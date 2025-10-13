@@ -17,6 +17,21 @@
 #error TIMER_FREQ <= 1000 recommended
 #endif
 
+/* Alarm Clock*/
+static struct list sleeping_threads;
+bool sleeping_threads_comparation (const struct list_elem *a, const struct list_elem *b,
+                      void *aux) {
+  struct thread *thread_a = list_entry(a, struct thread, elem);
+  struct thread *thread_b = list_entry(b, struct thread, elem);
+  
+  if(thread_a -> timer_sleep_tick < thread_b ->timer_sleep_tick) {
+    return true;
+  } else {
+    return false;
+  }
+
+}
+
 /* Number of timer ticks since OS booted. */
 static int64_t ticks;
 
@@ -37,6 +52,8 @@ timer_init (void)
 {
   pit_configure_channel (0, 2, TIMER_FREQ);
   intr_register_ext (0x20, timer_interrupt, "8254 Timer");
+  // Init sleeping_threads list
+  list_init(&sleeping_threads); 
 }
 
 /* Calibrates loops_per_tick, used to implement brief delays. */
@@ -92,8 +109,14 @@ timer_sleep (int64_t ticks)
   int64_t start = timer_ticks ();
 
   ASSERT (intr_get_level () == INTR_ON);
-  while (timer_elapsed (start) < ticks) 
-    thread_yield ();
+  // New for alarm-clock challenge
+  enum intr_level level = intr_disable(); 
+
+  thread_current ()->timer_sleep_tick = start + ticks;
+  list_insert_ordered(&sleeping_threads, &thread_current ()->elem, &sleeping_threads_comparation, NULL);
+  thread_block ();
+
+  intr_set_level(level);
 }
 
 /* Sleeps for approximately MS milliseconds.  Interrupts must be
@@ -172,6 +195,12 @@ timer_interrupt (struct intr_frame *args UNUSED)
 {
   ticks++;
   thread_tick ();
+  while(!list_empty(&sleeping_threads) &&
+  list_entry(list_front(&sleeping_threads), struct thread, elem) ->timer_sleep_tick <= timer_ticks()) {
+
+    struct thread *t = list_entry(list_pop_front(&sleeping_threads), struct thread, elem);
+    thread_unblock(t);
+  }
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer
