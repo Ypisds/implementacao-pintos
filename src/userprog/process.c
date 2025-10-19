@@ -17,9 +17,29 @@
 #include "threads/palloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "devices/timer.h"
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
+
+char ** set_arguments(char *filename, int *argc) {
+  char *token, *save_ptr;
+  char ** arguments = NULL;
+  *argc = 0;
+
+  for(token=strtok_r(filename, " ", &save_ptr); token != NULL; token=strtok_r(NULL, " ", &save_ptr)) {
+    (*argc)++;
+    arguments = (char**)realloc(arguments, *argc*sizeof(char*));
+    int length = strlen(token) + 1;
+    arguments[*argc-1] = (char *)malloc(length* sizeof(char));
+    arguments[*argc-1] = token;
+  }
+
+  arguments = (char**)realloc(arguments, ((*argc)+1)*sizeof(char *));
+  arguments[*argc] = NULL;
+  return arguments;
+}
+
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -38,8 +58,12 @@ process_execute (const char *file_name)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
 
+  /* Getting file name*/
+  char *name, *save_ptr;
+  name = strtok_r(file_name, " ",&save_ptr);
+
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
+  tid = thread_create (name, PRI_DEFAULT, start_process, fn_copy);
   if (tid == TID_ERROR)
     palloc_free_page (fn_copy); 
   return tid;
@@ -88,6 +112,7 @@ start_process (void *file_name_)
 int
 process_wait (tid_t child_tid UNUSED) 
 {
+  timer_msleep(1000);
   return -1;
 }
 
@@ -195,7 +220,7 @@ struct Elf32_Phdr
 #define PF_W 2          /* Writable. */
 #define PF_R 4          /* Readable. */
 
-static bool setup_stack (void **esp);
+static bool setup_stack (void **esp, char** arguments);
 static bool validate_segment (const struct Elf32_Phdr *, struct file *);
 static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
                           uint32_t read_bytes, uint32_t zero_bytes,
@@ -221,8 +246,13 @@ load (const char *file_name, void (**eip) (void), void **esp)
     goto done;
   process_activate ();
 
+  int *argc = (int *)malloc(sizeof(int));
+  char ** arguments = set_arguments(file_name, argc);
+  char * process_name = arguments[0];
+
+
   /* Open executable file. */
-  file = filesys_open (file_name);
+  file = filesys_open (process_name);
   if (file == NULL) 
     {
       printf ("load: %s: open failed\n", file_name);
@@ -302,7 +332,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
     }
 
   /* Set up stack. */
-  if (!setup_stack (esp))
+  if (!setup_stack (esp, arguments))
     goto done;
 
   /* Start address. */
@@ -427,20 +457,26 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 /* Create a minimal stack by mapping a zeroed page at the top of
    user virtual memory. */
 static bool
-setup_stack (void **esp) 
+setup_stack (void **esp, char **arguments) 
 {
   uint8_t *kpage;
   bool success = false;
+
+  
 
   kpage = palloc_get_page (PAL_USER | PAL_ZERO);
   if (kpage != NULL) 
     {
       success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
-      if (success)
-        *esp = PHYS_BASE;
+      if (success) {
+        *esp = PHYS_BASE -12;
+
+      }
       else
         palloc_free_page (kpage);
     }
+  
+  
   return success;
 }
 
