@@ -220,7 +220,7 @@ struct Elf32_Phdr
 #define PF_W 2          /* Writable. */
 #define PF_R 4          /* Readable. */
 
-static bool setup_stack (void **esp, char** arguments);
+static bool setup_stack (void **esp, char** argv, int * argc);
 static bool validate_segment (const struct Elf32_Phdr *, struct file *);
 static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
                           uint32_t read_bytes, uint32_t zero_bytes,
@@ -332,7 +332,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
     }
 
   /* Set up stack. */
-  if (!setup_stack (esp, arguments))
+  if (!setup_stack (esp, arguments, argc))
     goto done;
 
   /* Start address. */
@@ -457,7 +457,7 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 /* Create a minimal stack by mapping a zeroed page at the top of
    user virtual memory. */
 static bool
-setup_stack (void **esp, char **arguments) 
+setup_stack (void **esp, char **argv, int *argc) 
 {
   uint8_t *kpage;
   bool success = false;
@@ -469,7 +469,52 @@ setup_stack (void **esp, char **arguments)
     {
       success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
       if (success) {
-        *esp = PHYS_BASE -12;
+        *esp = PHYS_BASE;
+        int totalLength = 0;
+
+        char **argvAddress = (char**)malloc((*argc + 1)*sizeof(char*));
+        argvAddress[*argc] = NULL;
+
+        // Empilhando os argv:
+        for(int i = *argc -1; i >=0; i--) {
+          char *token = argv[i];
+          int length = strlen(token)+1;
+          totalLength+=length;
+          *esp -= length;
+          argvAddress[i] = *esp;
+          memcpy(*esp, token, length);
+        }
+
+        // Word Align:
+        int numberOfLoops = (4 - (totalLength%4))%4;
+        while(numberOfLoops > 0) {
+          *esp -= 1;
+          *(uint8_t *)(*esp) = 0;
+          numberOfLoops--;
+        }
+
+        // Colocando os ponteiros:
+        *esp -= 4;
+        *(char **)(*esp) = argvAddress[*argc]; // Equivalente ao argv[argc] = NULL
+
+        for(int i = *argc - 1; i >= 0; i--) { // Coloca os ponteiros para o argv
+          *esp -= 4;
+          *(char **)(*esp) = argvAddress[i];
+        }
+
+        char ** argv_zero = (char **)*esp; // Coloca o ponteiro para argv[0]
+        *esp -= 4;
+        *(char **)(*esp) = argv_zero;
+
+        // Colocando argc na pilha
+        *esp -= 4;
+        *(int *)(*esp) = *argc;
+
+        // Colocando falso retorno
+        *esp -= sizeof(void *);
+        memset(*esp, 0, sizeof(void *));
+
+        hex_dump((uintptr_t)*esp, *esp, PHYS_BASE - (uintptr_t)*esp, true);
 
       }
       else
