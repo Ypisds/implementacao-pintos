@@ -3,6 +3,7 @@
 #include <syscall-nr.h>
 #include "threads/interrupt.h"
 #include "threads/thread.h"
+#include "userprog/process.h"
 
 static void syscall_handler (struct intr_frame *);
 
@@ -57,27 +58,25 @@ syscall_handler (struct intr_frame *f)
         shutdown_power_off();
         break;
       case SYS_EXIT:
-        int status = *(int *)(f->esp+1);
+        int status = *((int *)f->esp+1);
         (f->eax) = status;
         printf ("%s: exit(%d)\n", thread_current()->name, status);
         thread_exit();
         break;
       case SYS_WAIT:
-        tid_t child_id = *(tid_t *)(f->esp+1);
+        tid_t child_id = *((tid_t *)f->esp+1);
         f->eax=child_id;
-        process_wait(); 
+        process_wait(child_id); 
         break;
       case SYS_WRITE:
-        int fd = *(int *)((int *)f->esp+1);
+        int fd = *((int *)f->esp+1);
         const void *buffer = (const void *)*((int*)f->esp+2);
-        unsigned size = *(unsigned *)((int *)f->esp+3);
+        unsigned size = *((int *)f->esp+3);
 
         if(fd == 1) {
           putbuf((char*)buffer, size);
           f->eax = size;
         }
-        
-
         break;
   }
 
