@@ -483,7 +483,9 @@ setup_stack (void **esp, char **argv, int *argc)
           *esp -= length;
           argvAddress[i] = *esp;
           memcpy(*esp, token, length);
+          
         }
+        
 
         // Word Align:
         int numberOfLoops = (4 - (totalLength%4))%4;
@@ -500,21 +502,23 @@ setup_stack (void **esp, char **argv, int *argc)
         for(int i = *argc - 1; i >= 0; i--) { // Coloca os ponteiros para o argv
           *esp -= 4;
           *(char **)(*esp) = argvAddress[i];
+          
         }
 
         char ** argv_zero = (char **)*esp; // Coloca o ponteiro para argv[0]
+        
         *esp -= 4;
-        *(char **)(*esp) = argv_zero;
+        *(char ***)(*esp) = argv_zero;
 
         // Colocando argc na pilha
         *esp -= 4;
         *(int *)(*esp) = *argc;
+        
 
         // Colocando falso retorno
         *esp -= sizeof(void *);
         memset(*esp, 0, sizeof(void *));
 
-        hex_dump((uintptr_t)*esp, *esp, PHYS_BASE - (uintptr_t)*esp, true);
 
       }
       else
