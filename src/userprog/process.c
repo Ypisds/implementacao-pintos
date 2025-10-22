@@ -19,8 +19,10 @@
 #include "threads/vaddr.h"
 #include "devices/timer.h"
 
+
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
+
 
 struct thread* get_child_by_tid(tid_t child_tid) {
     struct thread *current = thread_current();
@@ -35,14 +37,16 @@ struct thread* get_child_by_tid(tid_t child_tid) {
     return -1;
 }
 
-int get_child_status_by_tid(tid_t child_tid) {
-    struct thread *current = thread_current();
+struct child_status *get_child_status_by_tid(tid_t child_tid, struct thread *thread) {
+    struct thread *current = thread;
     struct list_elem *e;
+
+    if(current == NULL) return NULL;
 
     for (e = list_begin(&current->child_status_list); e != list_end(&current->child_status_list); e = list_next(e)) {
         struct child_status *child = list_entry(e, struct child_status, status_elem);
         if (child->child_id == child_tid) {
-            return child->status;
+            return child;
         }
     }
     return NULL;
@@ -97,9 +101,19 @@ process_execute (const char *file_name)
 
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (name, PRI_DEFAULT, start_process, fn_copy);
+
   palloc_free_page(fn_copy_for_name);
   if (tid == TID_ERROR)
-    palloc_free_page (fn_copy); 
+    palloc_free_page (fn_copy);
+  
+  else {
+    struct child_status *c = (struct child_status *)malloc(sizeof(struct child_status));
+    c->child_id = tid;
+    sema_init(&c->wait_sema, 0);
+    c->has_exited = false;
+    list_push_back(&thread_current()->child_status_list, &c->status_elem);
+  }
+
   
   return tid;
 }
@@ -119,12 +133,13 @@ start_process (void *file_name_)
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
   success = load (file_name, &if_.eip, &if_.esp);
-
+  
   /* If load failed, quit. */
   palloc_free_page (file_name);
   if (!success){
     thread_exit ();
-  } 
+  }
+ 
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
@@ -148,14 +163,18 @@ start_process (void *file_name_)
 int
 process_wait (tid_t child_tid) 
 {
-  struct thread *child_thread = get_child_by_tid(child_tid);
-  if(child_thread == NULL){
+  struct child_status *children = get_child_status_by_tid(child_tid, thread_current());
+  if(children == NULL){
+    return -1;
+  }
+  if(children->has_exited){
     return -1;
   }
 
-  sema_down(&child_thread->wait_sema);
+  if(!children->has_exited)
+     sema_down(&children->wait_sema);
 
-  int status = get_child_status_by_tid(child_tid);
+  int status = children -> status;
 
   return status;
 }

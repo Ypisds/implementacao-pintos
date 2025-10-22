@@ -186,7 +186,6 @@ thread_create (const char *name, int priority,
   #ifdef USERPROG
       t-> parent = thread_current();
 
-
       list_push_back(&thread_current()->child_list, &t->child_elem);
 
   #endif
@@ -475,7 +474,6 @@ init_thread (struct thread *t, const char *name, int priority)
   #ifdef USERPROG
     list_init(&t->child_list);
     list_init(&t->child_status_list);
-    sema_init(&t -> wait_sema, 0);
   #endif
 
   old_level = intr_disable ();

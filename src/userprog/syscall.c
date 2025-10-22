@@ -5,8 +5,11 @@
 #include "threads/thread.h"
 #include "userprog/process.h"
 #include "filesys/filesys.h"
+#include "threads/vaddr.h"
+#include "pagedir.h"
 
 static void syscall_handler (struct intr_frame *);
+void exit(int status);
 
 struct child_status* make_child_status(int status) {
   struct child_status *c = (struct child_status *)malloc(sizeof(struct child_status));
@@ -28,6 +31,11 @@ syscall_init (void)
 static void
 syscall_handler (struct intr_frame *f)  
 {
+  // /* Verifica se o esp do usuário é válido */
+  // if (!is_user_vaddr(f->esp) || f->esp == NULL || pagedir_get_page(thread_current()->pagedir, f->esp) == NULL) {
+  //   exit(-1);  /* Mata o processo */
+  // }
+
   int syscall_number = *(int *)f->esp;
 
   switch(syscall_number) {
@@ -37,9 +45,9 @@ syscall_handler (struct intr_frame *f)
       case SYS_EXEC: {
         char *cmd_line = (char*)*((int *)f->esp+1);
       
-        lock_acquire(&filesys_lock);
-        tid_t child_id = process_execute(cmd_line);
-        lock_release(&filesys_lock);
+        
+        tid_t child_id = exec(cmd_line);
+      
 
         if(child_id == TID_ERROR) {
           f->eax = -1;
@@ -58,17 +66,7 @@ syscall_handler (struct intr_frame *f)
       case SYS_EXIT:{
         int status = *((int *)f->esp+1);
         (f->eax) = status;
-        if(thread_current()->parent != NULL){
-          struct child_status *c_status = make_child_status(status);
-          list_push_back(
-            &thread_current()->parent->child_status_list,
-            &c_status->status_elem
-          );
-        }
-        list_remove(&thread_current()->child_elem);
-        sema_up(&thread_current()->wait_sema);
-        printf ("%s: exit(%d)\n", thread_current()->name, status);
-        thread_exit();
+        exit(status);
         break;
       }
       case SYS_WRITE:{
@@ -85,6 +83,27 @@ syscall_handler (struct intr_frame *f)
       }
   }
 
+}
+
+void exit(int status) {
+  struct child_status *c = get_child_status_by_tid(thread_current()->tid, thread_current()->parent);
+  if(c != NULL ){
+    c -> status = status;
+    c -> has_exited = true;
+    sema_up(&c-> wait_sema);
+  }
+  printf ("%s: exit(%d)\n", thread_current()->name, status);
+  thread_exit();
+}
+
+tid_t exec(const char* cmd_line){
+
+  if (cmd_line == NULL || !is_user_vaddr(cmd_line)) 
+      return -1;
+
+  lock_acquire(&filesys_lock);
+  return process_execute(cmd_line);
+  lock_release(&filesys_lock);
 }
 
 

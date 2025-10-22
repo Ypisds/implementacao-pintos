@@ -105,7 +105,6 @@ struct thread
     struct thread *parent;
     struct list child_list;
     struct list_elem child_elem;
-    struct semaphore wait_sema;
     struct list child_status_list;
 #endif
 
@@ -116,8 +115,11 @@ struct thread
 struct child_status{
    tid_t child_id;
    int status;
+   bool has_exited;
+   struct semaphore wait_sema;
    struct list_elem status_elem;
 };
+
 /* If false (default), use round-robin scheduler.
    If true, use multi-level feedback queue scheduler.
    Controlled by kernel command-line option "-o mlfqs". */
