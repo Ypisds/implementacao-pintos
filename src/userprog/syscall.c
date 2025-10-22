@@ -73,22 +73,10 @@ syscall_handler (struct intr_frame *f)
       case SYS_READ:
         sys_read(f);
         break;
-      }
+      
   }
 
 }
-
-
-tid_t exec(const char* cmd_line){
-
-  if (cmd_line == NULL || !is_user_vaddr(cmd_line)) 
-      return -1;
-
-  lock_acquire(&filesys_lock);
-  return process_execute(cmd_line);
-  lock_release(&filesys_lock);
-}
-
 
 void sys_exit(struct intr_frame *f){
   int status = *((int *)f->esp+1);
@@ -115,10 +103,9 @@ void sys_exec(struct intr_frame *f){
 
   if(child_id == TID_ERROR) {
     f->eax = -1;
-    break;
+  } else {
+    f-> eax = child_id;
   }
-
-  f-> eax = child_id;
 }
 void sys_wait(struct intr_frame *f){
   tid_t child_id = *((tid_t *)f->esp+1);
@@ -156,7 +143,7 @@ void sys_read(struct intr_frame *f){
   unsigned size = *((int *)f->esp+3);
 
   if(fd == 0) {
-    for(int keyCounter = 0; keyCounter < size; keyCounter++){
+    for(unsigned keyCounter = 0; keyCounter < size; keyCounter++){
       buffer[keyCounter] = input_getc();
     }
     f->eax = size;
