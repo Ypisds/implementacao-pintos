@@ -5,6 +5,7 @@
 #include <list.h>
 #include <stdint.h>
 #include "synch.h"
+#include "filesys/file.h"
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -96,6 +97,7 @@ struct thread
 
     // Alarm-clock:
     int64_t timer_sleep_tick;
+    
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
@@ -106,6 +108,10 @@ struct thread
     struct list child_list;
     struct list_elem child_elem;
     struct list child_status_list;
+
+    // file
+    struct file* fd_table[128];
+    int next_fd;
 #endif
 
     /* Owned by thread.c. */

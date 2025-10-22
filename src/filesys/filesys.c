@@ -7,6 +7,7 @@
 #include "filesys/inode.h"
 #include "filesys/directory.h"
 #include "threads/synch.h"
+#include "threads/thread.h"
 
 struct lock filesys_lock;
 
@@ -76,6 +77,9 @@ filesys_open (const char *name)
   if (dir != NULL)
     dir_lookup (dir, name, &inode);
   dir_close (dir);
+
+  if(strcmp(name, thread_current()->name) == 0)
+    file_deny_write(inode);
 
   return file_open (inode);
 }
