@@ -78,8 +78,6 @@ filesys_open (const char *name)
     dir_lookup (dir, name, &inode);
   dir_close (dir);
 
-  if(strcmp(name, thread_current()->name) == 0)
-    file_deny_write(inode);
 
   return file_open (inode);
 }

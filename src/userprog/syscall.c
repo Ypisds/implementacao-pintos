@@ -55,10 +55,9 @@ syscall_init (void)
 static void
 syscall_handler (struct intr_frame *f)  
 {
-  // /* Verifica se o esp do usuário é válido */
-  // if (!is_user_vaddr(f->esp) || f->esp == NULL || pagedir_get_page(thread_current()->pagedir, f->esp) == NULL) {
-  //   exit(-1);  /* Mata o processo */
-  // }
+  if(!is_valid_user_ptr((int*)f->esp) || !is_valid_user_ptr((int*)f->esp+1)) {
+    sys_exit(-1);
+  }
 
   int syscall_number = *(int *)f->esp;
 
@@ -151,6 +150,8 @@ void sys_create(struct intr_frame *f){
   const char *file = (const char*)*((int*)f->esp+1);
   unsigned initial_size = *((int*)f->esp+2);
 
+  if(!is_valid_user_ptr(file)) sys_exit(-1);
+
   lock_acquire(&filesys_lock);
   f->eax = filesys_create(file,initial_size);
   lock_release(&filesys_lock);
@@ -233,6 +234,8 @@ void sys_open(struct intr_frame *f) {
   if(!is_valid_user_ptr((int*)f->esp+1))
     sys_exit(-1);
   const char *filename = (char *)*((int*)f->esp+1);
+
+  if(!is_valid_user_ptr(filename)) sys_exit(-1);
 
   if (!is_user_vaddr(filename) || filename == NULL) {
     f->eax = -1;
