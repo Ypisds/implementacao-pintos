@@ -202,6 +202,11 @@ process_exit (void)
       pagedir_activate (NULL);
       pagedir_destroy (pd);
     }
+  if(cur->executable_file != NULL){
+    lock_acquire(&filesys_lock);
+    file_close(cur->executable_file);
+    lock_release(&filesys_lock);
+  }
 }
 
 /* Sets up the CPU for running user code in the current
@@ -323,6 +328,10 @@ load (const char *file_name, void (**eip) (void), void **esp)
       printf ("load: %s: open failed\n", file_name);
       goto done; 
     }
+  lock_acquire(&filesys_lock);
+  file_deny_write(file);
+  lock_release(&filesys_lock);
+  t->executable_file = file;
 
   /* Read and verify executable header. */
   if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr
@@ -407,7 +416,6 @@ load (const char *file_name, void (**eip) (void), void **esp)
 
  done:
   /* We arrive here whether the load is successful or not. */
-  file_close (file);
   return success;
 }
 

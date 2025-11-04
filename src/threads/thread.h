@@ -112,6 +112,8 @@ struct thread
     // file
     struct file* fd_table[128];
     int next_fd;
+    struct file* executable_file;
+    
 #endif
 
     /* Owned by thread.c. */
