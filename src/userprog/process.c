@@ -111,10 +111,13 @@ process_execute (const char *file_name)
     c->child_id = tid;
     sema_init(&c->wait_sema, 0);
     c->has_exited = false;
+    c->has_loaded = false;
     list_push_back(&thread_current()->child_status_list, &c->status_elem);
+
+    sema_down(&thread_current()->load_sema);
+    if(!get_child_status_by_tid(tid,thread_current())->has_loaded) return -1;
   }
 
-  
   return tid;
 }
 
@@ -138,6 +141,10 @@ start_process (void *file_name_)
   palloc_free_page (file_name);
   if (!success){
     thread_exit ();
+  }
+  else {
+    get_child_status_by_tid(thread_current()->tid, thread_current()->parent)->has_loaded=true;
+    sema_up(&thread_current()->parent->load_sema);
   }
  
 
@@ -167,6 +174,7 @@ process_wait (tid_t child_tid)
   if(children == NULL){
     return -1;
   }
+
   if(children->has_exited){
     return -1;
   }
@@ -174,6 +182,8 @@ process_wait (tid_t child_tid)
   if(!children->has_exited)
      sema_down(&children->wait_sema);
 
+  children->has_exited=true;
+  
   int status = children -> status;
 
   return status;
@@ -188,6 +198,10 @@ process_exit (void)
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
+  if(thread_current()->parent != NULL) {
+    if(get_child_status_by_tid(thread_current()->tid, thread_current()->parent)->has_loaded==false)
+      sema_up(&thread_current()->parent->load_sema);
+  }
   pd = cur->pagedir;
   if (pd != NULL) 
     {

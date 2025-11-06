@@ -112,7 +112,6 @@ void sys_exit(int status){
   struct child_status *c = get_child_status_by_tid(thread_current()->tid, thread_current()->parent);
   if(c != NULL ){
     c -> status = status;
-    c -> has_exited = true;
     sema_up(&c-> wait_sema);
   }
   printf ("%s: exit(%d)\n", thread_current()->name, status);
@@ -127,9 +126,9 @@ void sys_exec(struct intr_frame *f){
   if(!is_valid_user_ptr(cmd_line))
     sys_exit(-1);
 
-  lock_acquire(&filesys_lock);
+  
   child_id = process_execute(cmd_line);
-  lock_release(&filesys_lock);
+  
 
   if(child_id == TID_ERROR) {
     f->eax = -1;
