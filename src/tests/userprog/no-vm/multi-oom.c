@@ -103,7 +103,6 @@ consume_some_resources_and_die (int seed)
 int
 main (int argc, char *argv[])
 {
-  fail("Disabled for a moment!");
   int n;
 
   test_name = "multi-oom";

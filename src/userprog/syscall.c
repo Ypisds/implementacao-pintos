@@ -120,7 +120,19 @@ void sys_exit(int status){
 void sys_exec(struct intr_frame *f){
   if(!is_valid_user_ptr((int*)f->esp+1))
     sys_exit(-1);
+  for(int i = 0; i < 4; i++){
+    if(!is_valid_user_ptr((uint8_t*)f->esp+4+i)) sys_exit(-1);
+  }
   char *cmd_line = (char*)*((int *)f->esp+1);
+
+  char verification = 'a';
+  char *pointer = cmd_line;
+  while(verification != '\0'){
+    if(!is_valid_user_ptr(pointer)) sys_exit(-1);
+    verification = *pointer;
+    pointer += 1;
+  }
+  
   tid_t child_id;
   
   if(!is_valid_user_ptr(cmd_line))
