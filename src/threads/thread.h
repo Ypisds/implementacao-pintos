@@ -109,9 +109,14 @@ struct thread
     struct list_elem child_elem;
     struct list child_status_list;
 
+    // Load
+    struct semaphore load_sema;
+
     // file
     struct file* fd_table[128];
     int next_fd;
+    struct file* executable_file;
+    
 #endif
 
     /* Owned by thread.c. */
@@ -122,6 +127,7 @@ struct child_status{
    tid_t child_id;
    int status;
    bool has_exited;
+   bool has_loaded;
    struct semaphore wait_sema;
    struct list_elem status_elem;
 };

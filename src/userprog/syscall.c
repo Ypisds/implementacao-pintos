@@ -55,10 +55,9 @@ syscall_init (void)
 static void
 syscall_handler (struct intr_frame *f)  
 {
-  // /* Verifica se o esp do usuário é válido */
-  // if (!is_user_vaddr(f->esp) || f->esp == NULL || pagedir_get_page(thread_current()->pagedir, f->esp) == NULL) {
-  //   exit(-1);  /* Mata o processo */
-  // }
+  if(!is_valid_user_ptr((int*)f->esp) || !is_valid_user_ptr((int*)f->esp+1)) {
+    sys_exit(-1);
+  }
 
   int syscall_number = *(int *)f->esp;
 
@@ -113,7 +112,6 @@ void sys_exit(int status){
   struct child_status *c = get_child_status_by_tid(thread_current()->tid, thread_current()->parent);
   if(c != NULL ){
     c -> status = status;
-    c -> has_exited = true;
     sema_up(&c-> wait_sema);
   }
   printf ("%s: exit(%d)\n", thread_current()->name, status);
@@ -122,15 +120,27 @@ void sys_exit(int status){
 void sys_exec(struct intr_frame *f){
   if(!is_valid_user_ptr((int*)f->esp+1))
     sys_exit(-1);
+  for(int i = 0; i < 4; i++){
+    if(!is_valid_user_ptr((uint8_t*)f->esp+4+i)) sys_exit(-1);
+  }
   char *cmd_line = (char*)*((int *)f->esp+1);
+
+  char verification = 'a';
+  char *pointer = cmd_line;
+  while(verification != '\0'){
+    if(!is_valid_user_ptr(pointer)) sys_exit(-1);
+    verification = *pointer;
+    pointer += 1;
+  }
+  
   tid_t child_id;
   
   if(!is_valid_user_ptr(cmd_line))
     sys_exit(-1);
 
-  lock_acquire(&filesys_lock);
+  
   child_id = process_execute(cmd_line);
-  lock_release(&filesys_lock);
+  
 
   if(child_id == TID_ERROR) {
     f->eax = -1;
@@ -150,6 +160,8 @@ void sys_create(struct intr_frame *f){
     sys_exit(-1);
   const char *file = (const char*)*((int*)f->esp+1);
   unsigned initial_size = *((int*)f->esp+2);
+
+  if(!is_valid_user_ptr(file)) sys_exit(-1);
 
   lock_acquire(&filesys_lock);
   f->eax = filesys_create(file,initial_size);
@@ -233,6 +245,8 @@ void sys_open(struct intr_frame *f) {
   if(!is_valid_user_ptr((int*)f->esp+1))
     sys_exit(-1);
   const char *filename = (char *)*((int*)f->esp+1);
+
+  if(!is_valid_user_ptr(filename)) sys_exit(-1);
 
   if (!is_user_vaddr(filename) || filename == NULL) {
     f->eax = -1;
