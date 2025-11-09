@@ -4,6 +4,7 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
+#include <hash.h>
 #include "synch.h"
 #include "filesys/file.h"
 
@@ -117,6 +118,8 @@ struct thread
     int next_fd;
     struct file* executable_file;
     
+    struct hash sup_page_table; 
+
 #endif
 
     /* Owned by thread.c. */

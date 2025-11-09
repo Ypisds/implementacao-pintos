@@ -18,6 +18,7 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "devices/timer.h"
+#include "vm/page.h"
 
 
 static thread_func start_process NO_RETURN;
@@ -136,6 +137,8 @@ start_process (void *file_name_)
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
   success = load (file_name, &if_.eip, &if_.esp);
+  
+  sup_page_table_init(&thread_current()->sup_page_table);
   
   /* If load failed, quit. */
   palloc_free_page (file_name);
