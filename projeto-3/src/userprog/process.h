@@ -9,5 +9,6 @@ void process_exit (void);
 void process_activate (void);
 struct thread* get_child_by_tid(tid_t child_tid);
 struct child_status *get_child_status_by_tid(tid_t child_tid, struct thread *thread);
+bool install_page (void *upage, void *kpage, bool writable);
 
 #endif /* userprog/process.h */
