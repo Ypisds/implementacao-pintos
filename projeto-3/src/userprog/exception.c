@@ -9,6 +9,8 @@
 #include "threads/palloc.h"
 #include "threads/vaddr.h"
 
+#include "vm/frame.h"
+
 /* Number of page faults processed. */
 static long long page_fault_cnt;
 
@@ -156,7 +158,7 @@ page_fault (struct intr_frame *f)
   if(not_present && (fault_addr != NULL) && is_user_vaddr(fault_addr) && (fault_addr > (void *) 0x08048000) && fault_addr >= f->esp - 32){
 
    void* upage = pg_round_down(fault_addr);
-   void* kpage = (void*)palloc_get_page(PAL_USER | PAL_ZERO);
+   void* kpage = frame_table_insert(upage, PAL_USER | PAL_ZERO);
    bool writable = true;
 
    bool success = install_page(upage,kpage,writable);

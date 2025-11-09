@@ -14,7 +14,7 @@
 #ifdef USERPROG
 #include "userprog/process.h"
 #endif
-
+#include "vm/frame.h"
 /* Random value for struct thread's `magic' member.
    Used to detect stack overflow.  See the big comment at the top
    of thread.h for details. */
@@ -109,6 +109,8 @@ thread_start (void)
   struct semaphore idle_started;
   sema_init (&idle_started, 0);
   thread_create ("idle", PRI_MIN, idle, &idle_started);
+
+  frame_table_init();
 
   /* Start preemptive thread scheduling. */
   intr_enable ();
