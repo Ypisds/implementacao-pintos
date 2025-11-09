@@ -5,6 +5,9 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "syscall.h"
+#include "userprog/process.h"
+#include "threads/palloc.h"
+#include "threads/vaddr.h"
 
 /* Number of page faults processed. */
 static long long page_fault_cnt;
@@ -150,18 +153,27 @@ page_fault (struct intr_frame *f)
   user = (f->error_code & PF_U) != 0;
 
 
+  if(not_present && (fault_addr != NULL) && is_user_vaddr(fault_addr) && (fault_addr > (void *) 0x08048000) && fault_addr >= f->esp - 32){
 
-  /* To implement virtual memory, delete the rest of the function
-     body, and replace it with code that brings in the page to
-     which fault_addr refers. */
-  printf ("Page fault at %p: %s error %s page in %s context.\n",
-          fault_addr,
-          not_present ? "not present" : "rights violation",
-          write ? "writing" : "reading",
-          user ? "user" : "kernel");
-  
-   kill(f);
+   void* upage = pg_round_down(fault_addr);
+   void* kpage = (void*)palloc_get_page(PAL_USER | PAL_ZERO);
+   bool writable = true;
 
+   bool success = install_page(upage,kpage,writable);
+
+  }else if(user){
+   sys_exit(-1);
+  }else{
+   /* To implement virtual memory, delete the rest of the function
+      body, and replace it with code that brings in the page to
+      which fault_addr refers. */
+   printf ("Page fault at %p: %s error %s page in %s context.\n",
+            fault_addr,
+            not_present ? "not present" : "rights violation",
+            write ? "writing" : "reading",
+            user ? "user" : "kernel");
+      kill(f);
+  }
   
 }
 
