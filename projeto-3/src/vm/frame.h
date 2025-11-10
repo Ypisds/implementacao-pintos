@@ -6,8 +6,10 @@
 #include "threads/thread.h"
 #include "threads/palloc.h"
 #include "vm/page.h"
+#include "threads/synch.h"
 
 static struct list frame_table;
+extern struct lock frame_lock;
 
 struct frame_table_entry {
     uint32_t* frame;

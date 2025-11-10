@@ -8,14 +8,17 @@
 #include "userprog/process.h"
 #include "threads/palloc.h"
 #include "threads/vaddr.h"
+#include "filesys/filesys.h"
 
 #include "vm/frame.h"
+#include "vm/page.h"
 
 /* Number of page faults processed. */
 static long long page_fault_cnt;
 
 static void kill (struct intr_frame *);
 static void page_fault (struct intr_frame *);
+
 
 /* Registers handlers for interrupts that can be caused by user
    programs.
@@ -155,20 +158,65 @@ page_fault (struct intr_frame *f)
   user = (f->error_code & PF_U) != 0;
 
 
-  if(not_present && (fault_addr != NULL) && is_user_vaddr(fault_addr) && (fault_addr > (void *) 0x08048000) && fault_addr >= f->esp - 32){
 
-   void* upage = pg_round_down(fault_addr);
-   void* kpage = palloc_get_page(PAL_USER | PAL_ZERO);
-   bool writable = true;
-   if(kpage != NULL){
-      frame_table_insert(upage, kpage);
-      bool success = install_page(upage,kpage,writable);
-   }else{
+
+  if(user){
+      if (fault_addr == NULL || !is_user_vaddr(fault_addr)) {
+        sys_exit(-1);
+      }
+      struct thread *curr = thread_current();
+      void* upage = pg_round_down(fault_addr);
+      struct sup_page_table_entry *spt_entry = sup_page_get(&curr->sup_page_table, upage);
+
+      if(not_present && spt_entry != NULL){
+         //verifica se o endereço é válido
+         if(spt_entry != NULL){
+            void* kpage = palloc_get_page(PAL_USER);
+            if(spt_entry->file != NULL) {
+               lock_acquire(&filesys_lock);
+               file_seek(spt_entry->file, spt_entry->offset);
+               int bytes = file_read(spt_entry->file, kpage, spt_entry->read_bytes);
+               lock_release(&filesys_lock);
+
+               if (bytes < 0) {
+                  palloc_free_page(kpage);
+                  sys_exit(-1);
+               }
+               memset(kpage + bytes, 0, PGSIZE - bytes);
+            }
+            else {
+               memset(kpage, 0, PGSIZE);
+            }
+
+            if (!install_page(upage, kpage, spt_entry->writable)) {
+               palloc_free_page(kpage);
+               sys_exit(-1);
+            }
+
+            lock_acquire(&frame_lock);
+            frame_table_insert(upage, kpage);
+            lock_release(&frame_lock);
+            return;
+         }
+      }
       
-   }
+      if(not_present && spt_entry== NULL && (fault_addr >= (void *) 0x08048000) && fault_addr >= f->esp - 32){ // Caso em que não tem tabela na SPT(crescimento de pilha)
+         void *kpage = palloc_get_page(PAL_USER|PAL_ZERO);
 
-  }else if(user){
-   sys_exit(-1);
+         if (!install_page(upage, kpage, true)) {
+            palloc_free_page(kpage);
+            sys_exit(-1);
+         }
+
+         lock_acquire(&frame_lock);
+         frame_table_insert(upage, kpage);
+         lock_release(&frame_lock);
+         return;
+      }
+      sys_exit(-1);
+
+      
+   
   }else{
    /* To implement virtual memory, delete the rest of the function
       body, and replace it with code that brings in the page to

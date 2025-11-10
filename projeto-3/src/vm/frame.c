@@ -1,13 +1,16 @@
 #include "vm/frame.h"
 #include "threads/malloc.h"
 #include "devices/timer.h"
+#include "threads/synch.h"
 
 
 static bool access_frame_comparison (const struct list_elem *a, const struct list_elem *b,void *aux);
+struct lock frame_lock;
 
 void
 frame_table_init(void){
     list_init(&frame_table);
+    lock_init(&frame_lock);
 }
 
 void  

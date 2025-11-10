@@ -12,6 +12,9 @@
 #include "userprog/syscall.h"
 #include "filesys/file.h"
 #include "threads/pte.h"
+#include "vm/page.h"
+#include "threads/palloc.h"
+#include "vm/frame.h"
 
 static void syscall_handler (struct intr_frame *);
 
@@ -226,7 +229,6 @@ void sys_read(struct intr_frame *f){
   if(!is_valid_user_ptr(buffer)){
     sys_exit(-1);
   }
-
   if(fd == 0) {
     for(unsigned keyCounter = 0; keyCounter < size; keyCounter++){
       buffer[keyCounter] = input_getc();
@@ -363,5 +365,4 @@ void sys_close(struct intr_frame *f){
 
   }
 }
-
 

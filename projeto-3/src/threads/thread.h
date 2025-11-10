@@ -118,9 +118,12 @@ struct thread
     int next_fd;
     struct file* executable_file;
     
-    struct hash sup_page_table; 
+    
 
 #endif
+
+   // Project 3
+   struct hash sup_page_table; 
 
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */

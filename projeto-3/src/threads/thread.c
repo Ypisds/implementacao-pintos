@@ -482,6 +482,8 @@ init_thread (struct thread *t, const char *name, int priority)
       t->fd_table[i]=NULL;
     }
     t->next_fd = 2;
+
+    
   #endif
 
   old_level = intr_disable ();

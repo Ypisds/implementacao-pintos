@@ -1,4 +1,5 @@
 #include "page.h"
+#include "threads/vaddr.h"
 
 static unsigned sup_page_hash(const struct hash_elem *elem, void *aux);
 static bool sup_page_less(const struct hash_elem *a, const struct hash_elem *b, void *aux);
@@ -9,6 +10,17 @@ void sup_page_table_init(struct hash* sup_page_table){
 
 void sup_page_insert(struct hash* sup_page_table,struct sup_page_table_entry* page){
     hash_insert(sup_page_table,&page->hash_elem);
+}
+
+struct sup_page_table_entry* sup_page_get(struct hash *h, void *vaddr){
+    struct sup_page_table_entry sup_temp;
+    memset(&sup_temp, 0, sizeof sup_temp);
+    sup_temp.vaddr = vaddr; 
+
+    struct hash_elem *e = hash_find(h, &sup_temp.hash_elem);
+    if (e != NULL)
+        return hash_entry(e, struct sup_page_table_entry, hash_elem);
+    return NULL;
 }
 
 static unsigned sup_page_hash(const struct hash_elem *elem, void *aux){
