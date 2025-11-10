@@ -85,6 +85,10 @@ lookup_page (uint32_t *pd, const void *vaddr, bool create)
   return &pt[pt_no (vaddr)];
 }
 
+uint32_t *pagedir_lookup_page (uint32_t *pd, const void *vaddr) {
+  return lookup_page (pd,vaddr,false);
+}
+
 /* Adds a mapping in page directory PD from user virtual page
    UPAGE to the physical frame identified by kernel virtual
    address KPAGE.

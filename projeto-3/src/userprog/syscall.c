@@ -11,6 +11,7 @@
 #include "pagedir.h"
 #include "userprog/syscall.h"
 #include "filesys/file.h"
+#include "threads/pte.h"
 
 static void syscall_handler (struct intr_frame *);
 
@@ -215,6 +216,12 @@ void sys_read(struct intr_frame *f){
   int fd = *((int *)f->esp+1);
   uint8_t *buffer = (uint8_t *)*((int*)f->esp+2);
   unsigned size = *((int *)f->esp+3);
+
+  uint32_t *pte = pagedir_lookup_page(thread_current()->pagedir, buffer);
+  if(pte != NULL && (*pte & PTE_P)) {
+    if(!(*pte & PTE_U)) sys_exit(-1);
+    if(!(*pte & PTE_W)) sys_exit(-1);
+  }
 
   if(!is_valid_user_ptr(buffer)){
     sys_exit(-1);
