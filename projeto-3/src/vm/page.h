@@ -1,12 +1,11 @@
 #ifndef VM_PAGE_H
 #define VM_PAGE_H
 
-#include <stdint.h>
+#include <inttypes.h>
 #include <hash.h>
 
 struct sup_page_table_entry {
     uint32_t* vaddr;
-    uint64_t access_time;
     bool dirty;
     bool accessed;
     struct hash_elem hash_elem;
