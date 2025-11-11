@@ -192,23 +192,36 @@ void sys_write(struct intr_frame *f){
     sys_exit(-1);
   }
   
+  bool is_buffer_valid = verify_buffer(buffer, size, false);
 
   if(fd == 1) {
-    putbuf((char*)buffer, size);
-    f->eax = size;
+    if(is_buffer_valid){
+      putbuf((char*)buffer, size);
+      f->eax = size;
+      unpin_all(buffer,size);
+    }
+    else{
+      f->eax=-1;
+    }
   }
   else if(fd > 1) {
-    struct file *file = get_file_from_fd(fd);
-
-    if(file != NULL) {
-      lock_acquire(&filesys_lock);
-      int off = file_write(file, buffer, size);
-      lock_release(&filesys_lock);
-
-      f-> eax = off;
+    if(is_buffer_valid){
+      struct file *file = get_file_from_fd(fd);
+  
+      if(file != NULL) {
+        lock_acquire(&filesys_lock);
+        int off = file_write(file, buffer, size);
+        lock_release(&filesys_lock);
+  
+        f-> eax = off;
+      }
+      else {
+        f->eax = -1;
+      }
+      unpin_all(buffer, size);
     }
-    else {
-      f->eax = -1;
+    else{
+      f->eax=-1;
     }
   }
 }
@@ -226,26 +239,42 @@ void sys_read(struct intr_frame *f){
     if(!(*pte & PTE_W)) sys_exit(-1);
   }
 
-  if(!is_valid_user_ptr(buffer)){
-    sys_exit(-1);
-  }
+  // if(!is_valid_user_ptr(buffer)){
+  //   sys_exit(-1);
+  // }
+  if(!is_user_vaddr(buffer) || buffer == NULL) sys_exit(-1);
+  bool is_buffer_valid = verify_buffer(buffer, size, true);
   if(fd == 0) {
-    for(unsigned keyCounter = 0; keyCounter < size; keyCounter++){
-      buffer[keyCounter] = input_getc();
-    }
-    f->eax = size;
-  }
-  else if(fd > 1) {
-    struct file *file = get_file_from_fd(fd);
+    if(is_buffer_valid){
 
-    if(file != NULL) {
-      lock_acquire(&filesys_lock);
-      int off = file_read(file, buffer, size);
-      lock_release(&filesys_lock);
-
-      f-> eax = off;
+      for(unsigned keyCounter = 0; keyCounter < size; keyCounter++){
+        buffer[keyCounter] = input_getc();
+      }
+      f->eax = size;
+      unpin_all(buffer, size);
     }
     else {
+
+      f->eax = -1;
+    }
+    
+  }
+  else if(fd > 1) {
+    if(is_buffer_valid){
+      struct file *file = get_file_from_fd(fd);
+
+      if(file != NULL) {
+        lock_acquire(&filesys_lock);
+        int off = file_read(file, buffer, size);
+        lock_release(&filesys_lock);
+
+        f-> eax = off;
+      }
+      else {
+        f->eax = -1;
+      }
+      unpin_all(buffer, size);
+    } else {
       f->eax = -1;
     }
   }
@@ -366,7 +395,72 @@ void sys_close(struct intr_frame *f){
   }
 }
 
-// void verify_buffer(void *buffer, unsigned size, bool is_read) {
+bool verify_buffer(void *buffer, unsigned size, bool is_read) {
+  if(buffer == NULL){
+    return false;
+  }
 
-// }
+  struct sup_page_table_entry *spt_entry;
+  uint8_t *upage = (uint8_t *)pg_round_down(buffer);
+
+  for(uint8_t *i=upage; i<=buffer+size; i+=PGSIZE) {
+    if(!is_user_vaddr(i) || i < (void *) 0x08048000){
+      return false;
+    } 
+    else if(!pagedir_get_page(thread_current()->pagedir, (void *) i)) {
+      spt_entry = sup_page_get(&thread_current()->sup_page_table, (void*)i);
+      if(spt_entry){
+        void* kpage = palloc_get_page(PAL_USER);
+        if(spt_entry->swap){ // Caso em que a página está na área de swap
+
+        }else if(spt_entry->file != NULL) { // Não está na área de swap e está num arquivo
+            lock_acquire(&filesys_lock);
+            file_seek(spt_entry->file, spt_entry->offset);
+            int bytes = file_read(spt_entry->file, kpage, spt_entry->read_bytes);
+            lock_release(&filesys_lock);
+
+            if (bytes < 0) {
+              palloc_free_page(kpage);
+              return false;
+            }
+            memset(kpage + bytes, 0, PGSIZE - bytes);
+        }
+        else { // setta toda página como zero
+            memset(kpage, 0, PGSIZE);
+        }
+
+        if (!install_page((void*)i, kpage, spt_entry->writable)) {
+            palloc_free_page(kpage);
+            return false;
+        }
+        
+        lock_acquire(&frame_lock);
+        frame_table_insert(spt_entry, kpage);
+        lock_release(&frame_lock);
+
+        frame_pin(get_kpage_from_upage(spt_entry->vaddr));
+      }
+      else{
+        return false;
+      } 
+    }
+    else if(pagedir_get_page(thread_current()->pagedir, (void *) i)){
+      spt_entry = sup_page_get(&thread_current()->sup_page_table, (void*)i);
+      void *kpage = get_kpage_from_upage(spt_entry->vaddr);
+      frame_pin(kpage);
+
+      if(spt_entry && is_read){
+        if(!spt_entry->writable) return false;
+      }
+    }
+    
+  }
+  return true;
+}
+void unpin_all(void* buffer, unsigned size) {
+  uint8_t *upage = (uint8_t *)pg_round_down(buffer);
+  for(uint8_t*i = upage; i<buffer+size; i+=PGSIZE){
+    frame_unpin(get_kpage_from_upage((void*)i));
+  }
+}
 

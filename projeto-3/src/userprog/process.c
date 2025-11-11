@@ -19,6 +19,7 @@
 #include "threads/vaddr.h"
 #include "devices/timer.h"
 #include "vm/page.h"
+#include "vm/frame.h"
 
 
 static thread_func start_process NO_RETURN;
@@ -550,6 +551,7 @@ setup_stack (void **esp, char **argv, int *argc)
 {
   uint8_t *kpage;
   bool success = false;
+  struct thread *curr = thread_current();
 
   
 
@@ -558,6 +560,22 @@ setup_stack (void **esp, char **argv, int *argc)
     {
       success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
       if (success) {
+         struct sup_page_table_entry *spt_entry = (struct sup_page_table_entry *)malloc(sizeof(struct sup_page_table_entry));
+         spt_entry->vaddr = (void *)((uint8_t *) PHYS_BASE) - PGSIZE;
+         spt_entry->writable = true;    
+         spt_entry->in_memory = true;  
+         spt_entry->swap = false;
+         spt_entry->file = NULL;
+         spt_entry->offset = 0;
+         spt_entry->read_bytes = 0;
+         spt_entry->zero_bytes = PGSIZE;
+         spt_entry->index = 0;
+
+         sup_page_insert(&curr->sup_page_table, spt_entry);
+
+         lock_acquire(&frame_lock);
+         frame_table_insert(spt_entry, kpage);
+         lock_release(&frame_lock);
         *esp = PHYS_BASE;
         int totalLength = 0;
 
