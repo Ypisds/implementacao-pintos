@@ -20,5 +20,5 @@ struct frame_table_entry {
 };
 
 void frame_table_init(void);
-void frame_table_insert(void*,void*);
+void frame_table_insert(struct sup_page_table_entry *,void*);
 #endif /* vm/frame.h */

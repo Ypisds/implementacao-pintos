@@ -11,9 +11,12 @@ struct sup_page_table_entry {
     off_t offset;
     uint32_t read_bytes;
     uint32_t zero_bytes;
+    size_t index;
     bool writable;
     bool dirty;
     bool accessed;
+    bool swap;
+    bool in_memory;
     struct hash_elem hash_elem;
 };
 

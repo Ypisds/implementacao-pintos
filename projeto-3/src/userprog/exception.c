@@ -172,7 +172,10 @@ page_fault (struct intr_frame *f)
          //verifica se o endereço é válido
          if(spt_entry != NULL){
             void* kpage = palloc_get_page(PAL_USER);
-            if(spt_entry->file != NULL) {
+
+            if(spt_entry->swap){ // Caso em que a página está na área de swap
+
+            }else if(spt_entry->file != NULL) { // Não está na área de swap e está num arquivo
                lock_acquire(&filesys_lock);
                file_seek(spt_entry->file, spt_entry->offset);
                int bytes = file_read(spt_entry->file, kpage, spt_entry->read_bytes);
@@ -184,7 +187,7 @@ page_fault (struct intr_frame *f)
                }
                memset(kpage + bytes, 0, PGSIZE - bytes);
             }
-            else {
+            else { // setta toda página como zero
                memset(kpage, 0, PGSIZE);
             }
 
@@ -194,7 +197,7 @@ page_fault (struct intr_frame *f)
             }
 
             lock_acquire(&frame_lock);
-            frame_table_insert(upage, kpage);
+            frame_table_insert(spt_entry, kpage);
             lock_release(&frame_lock);
             return;
          }
@@ -207,9 +210,21 @@ page_fault (struct intr_frame *f)
             palloc_free_page(kpage);
             sys_exit(-1);
          }
+         struct sup_page_table_entry *spt_entry = (struct sup_page_table_entry *)malloc(sizeof(struct sup_page_table_entry));
+         spt_entry->vaddr = upage;
+         spt_entry->writable = true;    
+         spt_entry->in_memory = true;  
+         spt_entry->swap = false;
+         spt_entry->file = NULL;
+         spt_entry->offset = 0;
+         spt_entry->read_bytes = 0;
+         spt_entry->zero_bytes = PGSIZE;
+         spt_entry->index = 0;
+
+         sup_page_insert(&curr->sup_page_table, spt_entry);
 
          lock_acquire(&frame_lock);
-         frame_table_insert(upage, kpage);
+         frame_table_insert(spt_entry, kpage);
          lock_release(&frame_lock);
          return;
       }

@@ -366,3 +366,7 @@ void sys_close(struct intr_frame *f){
   }
 }
 
+// void verify_buffer(void *buffer, unsigned size, bool is_read) {
+
+// }
+

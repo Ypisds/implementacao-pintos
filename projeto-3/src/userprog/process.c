@@ -528,6 +528,7 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       spt_entry->writable=writable;
       spt_entry->dirty=false;
       spt_entry->accessed=false;
+      spt_entry->swap = false;
 
       sup_page_insert(&curr->sup_page_table, spt_entry);
 

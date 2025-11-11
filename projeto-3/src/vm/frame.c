@@ -14,17 +14,9 @@ frame_table_init(void){
 }
 
 void  
-frame_table_insert(void* vaddr, void* frame_addr){
+frame_table_insert(struct sup_page_table_entry *sup_page_table_entry, void* frame_addr){
     struct frame_table_entry* frame_entry;
-    struct sup_page_table_entry* sup_page_table_entry;
     frame_entry = (struct frame_table_entry*) malloc(sizeof(struct frame_table_entry));
-    sup_page_table_entry = (struct sup_page_table_entry*) malloc(sizeof(struct sup_page_table_entry));
-
-    sup_page_table_entry->vaddr = vaddr;
-    sup_page_table_entry->dirty = false;
-    sup_page_table_entry->accessed = false;
-
-    sup_page_insert(&thread_current()->sup_page_table, sup_page_table_entry);
 
     frame_entry->frame = (uint32_t*) frame_addr;
     frame_entry->owner = thread_current();
