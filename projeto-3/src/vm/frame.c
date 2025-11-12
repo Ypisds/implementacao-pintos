@@ -114,9 +114,6 @@ void *eviction(){
 
     if(frame_elem == NULL || frame_elem == list_end(&frame_table)) frame_elem = list_begin(&frame_table);
     struct frame_table_entry* fte = list_entry(frame_elem, struct frame_table_entry, list_elem);
-    printf("[EVICT_CHECK] candidate frame=%p owner=%s upage=%p pinned=%d\n",
-           fte->frame, fte->owner ? fte->owner->name : "NULL",
-           fte->page ? fte->page->vaddr : (void*)0, fte->pinned);
     
     frame_elem = list_next(frame_elem);
 
@@ -132,8 +129,6 @@ void *eviction(){
     else {
       if(fte->page->file == NULL || pagedir_is_dirty(curr->pagedir, upage)){
         size_t index = swap_out(fte->frame);
-        printf("[EVICT] owner=%s upage=%p kpage=%p -> swap_index(sector)=%zu\n",
-               thread_name(), upage, fte->frame, index);
 
         fte->page->index = index;
         fte->page->in_memory=false;

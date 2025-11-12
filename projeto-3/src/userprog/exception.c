@@ -178,10 +178,8 @@ page_fault (struct intr_frame *f)
          }
 
          if(spt_entry->swap){ // Caso em que a página está na área de swap
-            printf("[PAGEFAULT] upage=%p wants swap_index=%zu (spt_entry ptr=%p)\n",
-                   upage, spt_entry->index, spt_entry);
             reclamation(kpage, spt_entry->index);
-            printf("[PAGEFAULT] reclamation returned for upage=%p kpage=%p\n", upage, kpage);
+           
             spt_entry->swap = false;
             spt_entry->index = 0;    
             
@@ -205,8 +203,6 @@ page_fault (struct intr_frame *f)
             palloc_free_page(kpage);
             sys_exit(-1);
          }
-         printf("[PAGEFAULT] installed upage=%p -> kpage=%p writable=%d spt=%p\n",
-                upage, kpage, spt_entry->writable, spt_entry);
          spt_entry->in_memory=true;
          lock_acquire(&frame_lock);
          frame_table_insert(spt_entry, kpage);
