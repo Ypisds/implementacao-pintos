@@ -12,6 +12,8 @@
 
 #include "vm/frame.h"
 #include "vm/page.h"
+#include "vm/swap.h"
+#include "lib/kernel/bitmap.h"
 
 /* Number of page faults processed. */
 static long long page_fault_cnt;
@@ -170,43 +172,55 @@ page_fault (struct intr_frame *f)
 
       if(not_present && spt_entry != NULL){
          //verifica se o endereço é válido
-         if(spt_entry != NULL){
-            void* kpage = palloc_get_page(PAL_USER);
+         void* kpage = palloc_get_page(PAL_USER);
+         if(kpage == NULL){
+            kpage = eviction();
+         }
 
-            if(spt_entry->swap){ // Caso em que a página está na área de swap
+         if(spt_entry->swap){ // Caso em que a página está na área de swap
+            printf("[PAGEFAULT] upage=%p wants swap_index=%zu (spt_entry ptr=%p)\n",
+                   upage, spt_entry->index, spt_entry);
+            reclamation(kpage, spt_entry->index);
+            printf("[PAGEFAULT] reclamation returned for upage=%p kpage=%p\n", upage, kpage);
+            spt_entry->swap = false;
+            spt_entry->index = 0;    
+            
+         }else if(spt_entry->file != NULL) { // Não está na área de swap e está num arquivo
+            lock_acquire(&filesys_lock);
+            file_seek(spt_entry->file, spt_entry->offset);
+            int bytes = file_read(spt_entry->file, kpage, spt_entry->read_bytes);
+            lock_release(&filesys_lock);
 
-            }else if(spt_entry->file != NULL) { // Não está na área de swap e está num arquivo
-               lock_acquire(&filesys_lock);
-               file_seek(spt_entry->file, spt_entry->offset);
-               int bytes = file_read(spt_entry->file, kpage, spt_entry->read_bytes);
-               lock_release(&filesys_lock);
-
-               if (bytes < 0) {
-                  palloc_free_page(kpage);
-                  sys_exit(-1);
-               }
-               memset(kpage + bytes, 0, PGSIZE - bytes);
-            }
-            else { // setta toda página como zero
-               memset(kpage, 0, PGSIZE);
-            }
-
-            if (!install_page(upage, kpage, spt_entry->writable)) {
+            if (bytes < 0) {
                palloc_free_page(kpage);
                sys_exit(-1);
             }
-
-            lock_acquire(&frame_lock);
-            frame_table_insert(spt_entry, kpage);
-            lock_release(&frame_lock);
-            return;
+            memset(kpage + bytes, 0, PGSIZE - bytes);
          }
+         else { // setta toda página como zero
+            memset(kpage, 0, PGSIZE);
+         }
+         bool success = install_page(upage, kpage, spt_entry->writable);
+         if (!success) {
+            palloc_free_page(kpage);
+            sys_exit(-1);
+         }
+         printf("[PAGEFAULT] installed upage=%p -> kpage=%p writable=%d spt=%p\n",
+                upage, kpage, spt_entry->writable, spt_entry);
+         spt_entry->in_memory=true;
+         lock_acquire(&frame_lock);
+         frame_table_insert(spt_entry, kpage);
+         lock_release(&frame_lock);
+         return;
       }
       
-      if(not_present && spt_entry== NULL && (fault_addr >= (void *) 0x08048000) && fault_addr >= f->esp - 32){ // Caso em que não tem tabela na SPT(crescimento de pilha)
+      else if(fault_addr >= f->esp - 32 && fault_addr < PHYS_BASE){ // Caso em que não tem tabela na SPT(crescimento de pilha)
          void *kpage = palloc_get_page(PAL_USER|PAL_ZERO);
-
-         if (!install_page(upage, kpage, true)) {
+         if(kpage == NULL){
+            kpage = eviction();
+         }
+         bool success = install_page(upage, kpage, true);
+         if (!success) {
             palloc_free_page(kpage);
             sys_exit(-1);
          }
