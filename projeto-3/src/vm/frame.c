@@ -13,6 +13,8 @@ struct lock frame_lock;
 static struct list_elem* frame_elem;
 struct frame_table_entry *create_frame_table_entry(struct sup_page_table_entry *sup_page_table_entry, void* frame_addr);
 void install_page_in_memory(struct sup_page_table_entry *spt_entry, void *kpage);
+void handle_is_dirty_case(struct frame_table_entry* fte, void* upage);
+void remove_page_of_memory(struct frame_table_entry* fte, void *upage);
 
 void
 frame_table_init(void){
@@ -131,22 +133,10 @@ void *eviction(){
       pagedir_set_accessed(curr->pagedir, upage, false);
     }
     else {
-      if(fte->page->file == NULL || pagedir_is_dirty(curr->pagedir, upage)){
-        size_t index = swap_out(fte->frame);
-        fte->page->index = index;
-        fte->page->in_memory=false;
-        fte->page->swap=true; 
-      }
-      else{
-        fte->page->in_memory=false;
-      }
+      handle_is_dirty_case(fte,upage);
       void *kpage = fte->frame;
-      pagedir_clear_page(curr->pagedir, upage);
-      list_remove(&fte->list_elem);
-      free(fte); 
-      lock_release(&frame_lock);
-      
-      
+      remove_page_of_memory(fte, upage);
+      lock_release(&frame_lock);    
       return kpage;
     }
     
@@ -159,4 +149,24 @@ void install_page_in_memory(struct sup_page_table_entry *spt_entry, void *kpage)
   lock_acquire(&frame_lock);
   frame_table_insert(spt_entry, kpage);
   lock_release(&frame_lock);
+}
+
+void remove_page_of_memory(struct frame_table_entry* fte, void *upage){
+  struct thread * curr = fte->owner;
+  pagedir_clear_page(curr->pagedir, upage);
+  list_remove(&fte->list_elem);
+  free(fte); 
+}
+
+void handle_is_dirty_case(struct frame_table_entry* fte, void* upage){
+  struct thread* curr = fte->owner;
+  if(fte->page->file == NULL || pagedir_is_dirty(curr->pagedir, upage)){
+    size_t index = swap_out(fte->frame);
+    fte->page->index = index;
+    fte->page->in_memory=false;
+    fte->page->swap=true; 
+  }
+  else{
+    fte->page->in_memory=false;
+  }
 }
