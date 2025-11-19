@@ -20,6 +20,11 @@ static long long page_fault_cnt;
 
 static void kill (struct intr_frame *);
 static void page_fault (struct intr_frame *);
+void handle_page_in_swap_area(struct sup_page_table_entry *spt_entry, void *kpage);
+void handle_page_in_file(struct sup_page_table_entry *spt_entry, void *kpage);
+void handle_page_allocation_failure(void *kpage);
+void handle_spt_entry_present(struct sup_page_table_entry *spt_entry, void *upage);
+void handle_grow_stack(void *upage);
 
 
 /* Registers handlers for interrupts that can be caused by user
@@ -163,85 +168,7 @@ page_fault (struct intr_frame *f)
 
 
   if(user){
-      if (fault_addr == NULL || !is_user_vaddr(fault_addr)) {
-        sys_exit(-1);
-      }
-      struct thread *curr = thread_current();
-      void* upage = pg_round_down(fault_addr);
-      struct sup_page_table_entry *spt_entry = sup_page_get(&curr->sup_page_table, upage);
-
-      if(not_present && spt_entry != NULL){
-         //verifica se o endereço é válido
-         void* kpage = palloc_get_page(PAL_USER);
-         if(kpage == NULL){
-            kpage = eviction();
-         }
-
-         if(spt_entry->swap){ // Caso em que a página está na área de swap
-            reclamation(kpage, spt_entry->index);
-           
-            spt_entry->swap = false;
-            spt_entry->index = 0;    
-            
-         }else if(spt_entry->file != NULL) { // Não está na área de swap e está num arquivo
-            lock_acquire(&filesys_lock);
-            file_seek(spt_entry->file, spt_entry->offset);
-            int bytes = file_read(spt_entry->file, kpage, spt_entry->read_bytes);
-            lock_release(&filesys_lock);
-
-            if (bytes < 0) {
-               palloc_free_page(kpage);
-               sys_exit(-1);
-            }
-            memset(kpage + bytes, 0, PGSIZE - bytes);
-         }
-         else { // setta toda página como zero
-            memset(kpage, 0, PGSIZE);
-         }
-         bool success = install_page(upage, kpage, spt_entry->writable);
-         if (!success) {
-            palloc_free_page(kpage);
-            sys_exit(-1);
-         }
-         spt_entry->in_memory=true;
-         lock_acquire(&frame_lock);
-         frame_table_insert(spt_entry, kpage);
-         lock_release(&frame_lock);
-         return;
-      }
-      
-      else if(fault_addr >= f->esp - 32 && fault_addr < PHYS_BASE){ // Caso em que não tem tabela na SPT(crescimento de pilha)
-         void *kpage = palloc_get_page(PAL_USER|PAL_ZERO);
-         if(kpage == NULL){
-            kpage = eviction();
-         }
-         bool success = install_page(upage, kpage, true);
-         if (!success) {
-            palloc_free_page(kpage);
-            sys_exit(-1);
-         }
-         struct sup_page_table_entry *spt_entry = (struct sup_page_table_entry *)malloc(sizeof(struct sup_page_table_entry));
-         spt_entry->vaddr = upage;
-         spt_entry->writable = true;    
-         spt_entry->in_memory = true;  
-         spt_entry->swap = false;
-         spt_entry->file = NULL;
-         spt_entry->offset = 0;
-         spt_entry->read_bytes = 0;
-         spt_entry->zero_bytes = PGSIZE;
-         spt_entry->index = 0;
-
-         sup_page_insert(&curr->sup_page_table, spt_entry);
-
-         lock_acquire(&frame_lock);
-         frame_table_insert(spt_entry, kpage);
-         lock_release(&frame_lock);
-         return;
-      }
-      sys_exit(-1);
-
-      
-   
+      handle_user_page_fault(fault_addr, not_present, f->esp-32);
   }else{
    /* To implement virtual memory, delete the rest of the function
       body, and replace it with code that brings in the page to
@@ -255,4 +182,87 @@ page_fault (struct intr_frame *f)
   }
   
 }
+
+void handle_user_page_fault(void *fault_addr, bool not_present, uint32_t grow_stack_area){
+   if (fault_addr == NULL || !is_user_vaddr(fault_addr)) {
+      sys_exit(-1);
+   }
+   struct thread *curr = thread_current();
+   void* upage = pg_round_down(fault_addr);
+   struct sup_page_table_entry *spt_entry = sup_page_get(&curr->sup_page_table, upage);
+
+   if(not_present && spt_entry != NULL){
+      handle_spt_entry_present(spt_entry, upage);
+      return;
+   }
+   
+   else if(fault_addr >= grow_stack_area && fault_addr < PHYS_BASE){ // Caso em que não tem tabela na SPT(crescimento de pilha)
+      handle_grow_stack(upage);
+      return;
+   }
+   sys_exit(-1);
+}
+
+void handle_spt_entry_present(struct sup_page_table_entry *spt_entry, void *upage){
+   struct thread *curr = thread_current();
+   void* kpage = palloc_get_page(PAL_USER);
+   if(kpage == NULL){
+      kpage = eviction();
+   }
+   if(spt_entry->swap){ 
+      handle_page_in_swap_area(spt_entry, kpage);
+   }else if(spt_entry->file != NULL) { 
+      handle_page_in_file(spt_entry, kpage);
+   }
+   else { // setta toda página como zero
+      memset(kpage, 0, PGSIZE);
+   }
+
+   bool success = install_page(upage, kpage, spt_entry->writable);
+   if (!success) {
+      handle_page_allocation_failure(kpage);
+   }
+   sup_page_insert(&curr->sup_page_table, spt_entry);
+   install_page_in_memory(spt_entry, kpage);
+}
+
+void handle_grow_stack(void *upage){
+   struct thread *curr = thread_current();
+   void *kpage = palloc_get_page(PAL_USER|PAL_ZERO);
+   if(kpage == NULL){
+      kpage = eviction();
+   }
+   bool success = install_page(upage, kpage, true);
+   if (!success) {
+      handle_page_allocation_failure(kpage);
+   }
+   struct sup_page_table_entry *spt_entry = create_default_grow_stack_sup_entry(upage);
+   sup_page_insert(&curr->sup_page_table, spt_entry);
+   install_page_in_memory(spt_entry, kpage);
+}
+
+void handle_page_in_swap_area(struct sup_page_table_entry *spt_entry, void *kpage){
+   reclamation(kpage, spt_entry->index);
+   spt_entry->swap = false;
+   spt_entry->index = 0;   
+}
+
+void handle_page_in_file(struct sup_page_table_entry *spt_entry, void *kpage){
+   lock_acquire(&filesys_lock);
+   file_seek(spt_entry->file, spt_entry->offset);
+   int bytes = file_read(spt_entry->file, kpage, spt_entry->read_bytes);
+   lock_release(&filesys_lock);
+
+   if (bytes < 0) {
+      palloc_free_page(kpage);
+      sys_exit(-1);
+   }
+   memset(kpage + bytes, 0, PGSIZE - bytes);
+}
+
+void handle_page_allocation_failure(void *kpage){
+   palloc_free_page(kpage);
+   sys_exit(-1);
+}
+
 

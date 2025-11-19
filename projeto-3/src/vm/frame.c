@@ -11,6 +11,8 @@
 static bool access_frame_comparison (const struct list_elem *a, const struct list_elem *b,void *aux);
 struct lock frame_lock;
 static struct list_elem* frame_elem;
+struct frame_table_entry *create_frame_table_entry(struct sup_page_table_entry *sup_page_table_entry, void* frame_addr);
+void install_page_in_memory(struct sup_page_table_entry *spt_entry, void *kpage);
 
 void
 frame_table_init(void){
@@ -22,6 +24,15 @@ frame_table_init(void){
 void  
 frame_table_insert(struct sup_page_table_entry *sup_page_table_entry, void* frame_addr){
     
+    struct frame_table_entry* frame_entry = create_frame_table_entry(sup_page_table_entry, frame_addr);
+    
+    list_push_back(&frame_table,&frame_entry->list_elem);
+    
+    if(frame_elem == NULL) frame_elem=list_begin(&frame_table);
+
+}
+
+struct frame_table_entry *create_frame_table_entry(struct sup_page_table_entry *sup_page_table_entry, void* frame_addr) {
     struct frame_table_entry* frame_entry;
     frame_entry = (struct frame_table_entry*) malloc(sizeof(struct frame_table_entry));
 
@@ -29,17 +40,10 @@ frame_table_insert(struct sup_page_table_entry *sup_page_table_entry, void* fram
     frame_entry->owner = thread_current();
     frame_entry->page = sup_page_table_entry; 
     frame_entry->pinned = false;
-    
-    list_push_back(&frame_table,&frame_entry->list_elem);
-    
-
-    if(frame_elem == NULL) frame_elem=list_begin(&frame_table);
-
+    return frame_entry;
 }
 
-struct frame_table_entry* frame_get_entry(void *kpage){
-  
-
+struct frame_table_entry* frame_get_entry_by_kpage(void *kpage){
   if(list_empty(&frame_table)){
     
     return NULL;
@@ -64,7 +68,7 @@ void *get_kpage_from_upage(void *upage){
     
     return NULL;
   }
-   struct list_elem* e;
+  struct list_elem* e;
   struct frame_table_entry * fte;
   for(e=list_begin(&frame_table); e != list_end(&frame_table); e=list_next(e)){
     fte = list_entry(e, struct frame_table_entry, list_elem);
@@ -92,13 +96,13 @@ void *get_kpage_from_upage(void *upage){
 
 void frame_pin(void *kpage) {
   lock_acquire(&frame_lock);
-  struct frame_table_entry* fte = frame_get_entry(kpage);
+  struct frame_table_entry* fte = frame_get_entry_by_kpage(kpage);
   fte->pinned=true;
   lock_release(&frame_lock);
 }
 void frame_unpin(void *kpage){
   lock_acquire(&frame_lock);
-  struct frame_table_entry* fte = frame_get_entry(kpage);
+  struct frame_table_entry* fte = frame_get_entry_by_kpage(kpage);
   fte->pinned=false;
   lock_release(&frame_lock);
 }
@@ -129,11 +133,9 @@ void *eviction(){
     else {
       if(fte->page->file == NULL || pagedir_is_dirty(curr->pagedir, upage)){
         size_t index = swap_out(fte->frame);
-
         fte->page->index = index;
         fte->page->in_memory=false;
-        fte->page->swap=true;
-        
+        fte->page->swap=true; 
       }
       else{
         fte->page->in_memory=false;
@@ -149,4 +151,12 @@ void *eviction(){
     }
     
   }
+}
+
+void install_page_in_memory(struct sup_page_table_entry *spt_entry, void *kpage){
+  struct thread* curr = thread_current();
+  spt_entry->in_memory=true;
+  lock_acquire(&frame_lock);
+  frame_table_insert(spt_entry, kpage);
+  lock_release(&frame_lock);
 }

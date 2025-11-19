@@ -25,5 +25,6 @@ void frame_pin(void *);
 void frame_unpin(void *);
 void *get_kpage_from_upage(void *);
 void *eviction();
+void install_page_in_memory(struct sup_page_table_entry *spt_entry, void *kpage);
 
 #endif /* vm/frame.h */

@@ -23,5 +23,6 @@ struct sup_page_table_entry {
 void sup_page_table_init(struct hash*);
 void sup_page_insert(struct hash*,struct sup_page_table_entry*);
 struct sup_page_table_entry* sup_page_get(struct hash *h, void *vaddr);
+struct sup_page_table_entry* create_default_grow_stack_sup_entry(void * upage);
 
 #endif /* vm/page.h */
