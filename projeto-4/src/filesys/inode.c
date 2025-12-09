@@ -6,6 +6,7 @@
 #include "filesys/filesys.h"
 #include "filesys/free-map.h"
 #include "threads/malloc.h"
+#include "filesys/cache.h"
 
 /* Identifies an inode. */
 #define INODE_MAGIC 0x494e4f44
@@ -35,7 +36,7 @@ allocate_sector (block_sector_t *sector_idx)
   if (!free_map_allocate (1, sector_idx))
     return false;
   static char zeros[BLOCK_SECTOR_SIZE];
-  block_write (fs_device, *sector_idx, zeros);
+  cache_write (*sector_idx, zeros);
   return true;
 }
 
@@ -70,14 +71,14 @@ inode_get_block (struct inode_disk *disk_inode, block_sector_t sector_index, boo
       block_sector_t *indirect_block = malloc (BLOCK_SECTOR_SIZE);
       if (!indirect_block) return 0;
 
-      block_read (fs_device, disk_inode->indirect, indirect_block);
+      cache_read (disk_inode->indirect, indirect_block);
       
       block_sector_t ret = indirect_block[sector_index];
       if (ret == 0 && create)
         {
           if (allocate_sector (&indirect_block[sector_index]))
             {
-              block_write (fs_device, disk_inode->indirect, indirect_block);
+              cache_write (disk_inode->indirect, indirect_block);
               ret = indirect_block[sector_index];
             }
         }
@@ -99,7 +100,7 @@ inode_get_block (struct inode_disk *disk_inode, block_sector_t sector_index, boo
       /* Nível 1: Ler o índice do índice */
       block_sector_t *l1_block = malloc (BLOCK_SECTOR_SIZE);
       if (!l1_block) return 0;
-      block_read (fs_device, disk_inode->double_indirect, l1_block);
+      cache_read (disk_inode->double_indirect, l1_block);
 
       off_t l1_idx = sector_index / PTRS_PER_SECTOR;
       off_t l2_idx = sector_index % PTRS_PER_SECTOR;
@@ -111,7 +112,7 @@ inode_get_block (struct inode_disk *disk_inode, block_sector_t sector_index, boo
               free (l1_block);
               return 0;
             }
-          block_write (fs_device, disk_inode->double_indirect, l1_block);
+          cache_write (disk_inode->double_indirect, l1_block);
         }
       
       block_sector_t next_sector = l1_block[l1_idx];
@@ -120,14 +121,14 @@ inode_get_block (struct inode_disk *disk_inode, block_sector_t sector_index, boo
       /* Nível 2: Ler o índice final */
       block_sector_t *l2_block = malloc (BLOCK_SECTOR_SIZE);
       if (!l2_block) return 0;
-      block_read (fs_device, next_sector, l2_block);
+      cache_read (next_sector, l2_block);
 
       block_sector_t ret = l2_block[l2_idx];
       if (ret == 0 && create)
         {
           if (allocate_sector (&l2_block[l2_idx]))
             {
-              block_write (fs_device, next_sector, l2_block);
+              cache_write (next_sector, l2_block);
               ret = l2_block[l2_idx];
             }
         }
@@ -220,7 +221,7 @@ inode_create (block_sector_t sector, off_t length)
             }
         }
 
-      block_write (fs_device, sector, disk_inode);
+      cache_write (sector, disk_inode);
       success = true;
       free (disk_inode);
     }
@@ -266,7 +267,7 @@ inode_open (block_sector_t sector)
   inode->open_cnt = 1;
   inode->deny_write_cnt = 0;
   inode->removed = false;
-  block_read (fs_device, inode->sector, &inode->data);
+  cache_read (inode->sector, &inode->data);
   return inode;
 }
 
@@ -372,7 +373,7 @@ inode_read_at (struct inode *inode, void *buffer_, off_t size, off_t offset)
       if (sector_ofs == 0 && chunk_size == BLOCK_SECTOR_SIZE)
         {
           /* Read full sector directly into caller's buffer. */
-          block_read (fs_device, sector_idx, buffer + bytes_read);
+          cache_read (sector_idx, buffer + bytes_read);
         }
       else 
         {
@@ -384,7 +385,7 @@ inode_read_at (struct inode *inode, void *buffer_, off_t size, off_t offset)
               if (bounce == NULL)
                 break;
             }
-          block_read (fs_device, sector_idx, bounce);
+          cache_read (sector_idx, bounce);
           memcpy (buffer + bytes_read, bounce + sector_ofs, chunk_size);
         }
       
@@ -432,7 +433,7 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
             }
           
           disk_inode->length = offset + size;
-          block_write (fs_device, inode->sector, disk_inode);
+          cache_write (inode->sector, disk_inode);
         }
     }
 
@@ -459,7 +460,7 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
 
       if (sector_ofs == 0 && chunk_size == BLOCK_SECTOR_SIZE)
         {
-          block_write (fs_device, sector_idx, buffer + bytes_written);
+          cache_write(sector_idx, buffer + bytes_written);
         }
       else 
         {
@@ -470,11 +471,11 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
             }
 
           if (sector_ofs > 0 || chunk_size < sector_left) 
-            block_read (fs_device, sector_idx, bounce);
+            cache_read (sector_idx, bounce);
           else
             memset (bounce, 0, BLOCK_SECTOR_SIZE);
           memcpy (bounce + sector_ofs, buffer + bytes_written, chunk_size);
-          block_write (fs_device, sector_idx, bounce);
+          cache_write (sector_idx, bounce);
         }
 
       size -= chunk_size;
@@ -527,7 +528,7 @@ inode_mark_as_dir (block_sector_t sector)
   inode->data.is_dir = 1;
 
   /* Grava a alteração de volta no disco imediatamente */
-  block_write (fs_device, inode->sector, &inode->data);
+  cache_write (inode->sector, &inode->data);
 
   inode_close (inode);
   return true;
