@@ -5,6 +5,13 @@
 #include "filesys/filesys.h"
 #include "filesys/inode.h"
 #include "threads/malloc.h"
+#include <string.h>
+#include "threads/thread.h"
+
+bool handle_absolute_path(const char *name, struct inode **inode);
+bool processing_path(char * path_copy, struct inode** inode, struct dir* actual_dir);
+bool handle_relative_path(const char *name, struct inode **inode);
+bool handle_absolute_path(const char *name, struct inode **inode);
 
 /* A directory. */
 struct dir 
@@ -23,10 +30,37 @@ struct dir_entry
 
 /* Creates a directory with space for ENTRY_CNT entries in the
    given SECTOR.  Returns true if successful, false on failure. */
+/* Creates a directory in the given SECTOR. 
+   Returns true if successful, false on failure. */
 bool
-dir_create (block_sector_t sector, size_t entry_cnt)
+dir_create (block_sector_t sector, size_t entry_cnt, block_sector_t parent) // <--- Recebe o PAI aqui
 {
-  return inode_create (sector, entry_cnt * sizeof (struct dir_entry));
+  /* 1. Cria como se fosse um arquivo normal (is_dir = 0) */
+  if (!inode_create (sector, 0)) 
+    return false;
+
+  /* 2. Marca a flag de diretório */
+  if (!inode_mark_as_dir (sector)) 
+    return false;
+
+  /* 3. Abre o diretório recém-criado */
+  struct dir *dir = dir_open (inode_open (sector));
+  if (dir == NULL) 
+    return false;
+
+  /* 4. Adiciona as entradas mágicas */
+  bool success = true;
+  
+  /* "." -> Aponta para SI MESMO */
+  if (!dir_add (dir, ".", sector)) 
+    success = false;
+
+  /* ".." -> Aponta para o PAI recebido por parâmetro */
+  if (!dir_add (dir, "..", parent)) 
+    success = false; 
+
+  dir_close (dir);
+  return success;
 }
 
 /* Opens and returns the directory for the given INODE, of which
@@ -81,6 +115,25 @@ struct inode *
 dir_get_inode (struct dir *dir) 
 {
   return dir->inode;
+}
+
+static bool
+is_dir_empty (struct dir *dir)
+{
+  struct dir_entry e;
+  off_t ofs;
+
+  for (ofs = 0; inode_read_at (dir->inode, &e, sizeof e, ofs) == sizeof e;
+       ofs += sizeof e)
+    {
+      if (e.in_use)
+        {
+          /* Se encontrar qualquer coisa que não seja "." ou "..", não está vazio */
+          if (strcmp (e.name, ".") != 0 && strcmp (e.name, "..") != 0)
+            return false;
+        }
+    }
+  return true;
 }
 
 /* Searches DIR for a file with the given NAME.
@@ -192,21 +245,47 @@ dir_remove (struct dir *dir, const char *name)
   ASSERT (dir != NULL);
   ASSERT (name != NULL);
 
-  /* Find directory entry. */
+  if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0)
+    return false;
+
+  /* 1. Find directory entry. */
   if (!lookup (dir, name, &e, &ofs))
     goto done;
 
-  /* Open inode. */
+  /* 2. Open inode. */
   inode = inode_open (e.inode_sector);
   if (inode == NULL)
     goto done;
 
-  /* Erase directory entry. */
+  /* 3. SEGURANÇA: Verificar se é um diretório */
+  if (inode_is_dir (inode)) 
+    {
+      /* 3.1 Se for diretório, verificar se é o diretório raiz (não pode deletar root) */
+      if (inode_get_inumber(inode) == ROOT_DIR_SECTOR) goto done; 
+
+
+      /* 3.3 Verificar se o diretório está vazio */
+      struct dir *target_dir = dir_open (inode_reopen (inode));
+      if (target_dir == NULL) goto done;
+
+      bool is_empty = is_dir_empty (target_dir);
+      
+      /* Precisamos fechar o target_dir aqui, mas SEM fechar o inode original
+         pois dir_open dá um inode_reopen. Vamos usar dir_close mas cuidado
+         para não fechar o inode que abrimos na linha "inode = ...".
+         Melhor: dir_open incrementa open_cnt, dir_close decrementa. Seguro. */
+      dir_close (target_dir);
+
+      if (!is_empty)
+        goto done; /* Falha: diretório não está vazio */
+    }
+
+  /* 4. Erase directory entry. */
   e.in_use = false;
   if (inode_write_at (dir->inode, &e, sizeof e, ofs) != sizeof e) 
     goto done;
 
-  /* Remove inode. */
+  /* 5. Remove inode. */
   inode_remove (inode);
   success = true;
 
@@ -214,7 +293,6 @@ dir_remove (struct dir *dir, const char *name)
   inode_close (inode);
   return success;
 }
-
 /* Reads the next directory entry in DIR and stores the name in
    NAME.  Returns true if successful, false if the directory
    contains no more entries. */
@@ -234,3 +312,181 @@ dir_readdir (struct dir *dir, char name[NAME_MAX + 1])
     }
   return false;
 }
+
+bool
+dir_path_handler(const char *name, struct inode **inode){ // passa um path e escreve no inode
+  if(name[0] == '/') {
+    return handle_absolute_path(name, inode);
+  }else {
+    return handle_relative_path(name, inode);
+  }         
+}
+
+bool
+handle_absolute_path(const char *name, struct inode **inode) {
+  struct dir *actual_dir = dir_open_root();
+
+
+  char *path_copy = malloc(strlen(name) + 1);
+  if (path_copy == NULL) {
+      dir_close(actual_dir);
+      return false;
+  }
+  strlcpy(path_copy, name, strlen(name) + 1);
+
+  return processing_path(path_copy, inode, actual_dir);
+}
+
+bool
+handle_relative_path(const char *name, struct inode **inode) {
+  struct dir *actual_dir;
+  struct thread *t = thread_current();
+
+  
+  if (t->working_dir != NULL) {
+      actual_dir = dir_reopen(t->working_dir);
+  } else {
+      actual_dir = dir_open_root();
+  }
+
+
+  if (actual_dir == NULL) return false;
+
+  
+  char *path_copy = malloc(strlen(name) + 1);
+  if (path_copy == NULL) {
+      dir_close(actual_dir);
+      return false;
+  }
+  strlcpy(path_copy, name, strlen(name) + 1);
+
+  return processing_path(path_copy, inode, actual_dir);
+}
+
+bool
+processing_path(char * path_copy, struct inode** inode, struct dir* actual_dir){
+  // criar função para o processamento
+  char *token, *next_token, *save_ptr;
+  token=strtok_r(path_copy, "/", &save_ptr);
+
+  if(token == NULL) {
+    *inode = dir_get_inode(actual_dir);
+    inode_reopen(*inode); /* Incrementa ref count pois vamos fechar curr_dir */
+    dir_close(actual_dir);
+    free(path_copy);
+    return true;
+  }
+
+  while(token != NULL) {
+    if(!dir_lookup(actual_dir, token, inode)){
+      dir_close(actual_dir);
+      free(path_copy);
+      return false;
+    }
+    
+    next_token = strtok_r(NULL, "/", &save_ptr);
+
+    if(next_token != NULL) {
+
+      if(!inode_is_dir(*inode)) {
+        inode_close(*inode);
+        dir_close(actual_dir);
+        *inode = NULL;
+        free(path_copy);
+        return false;
+      }
+
+      dir_close(actual_dir);
+      actual_dir = dir_open(*inode);
+      token = next_token;
+    }
+    else {
+      dir_close(actual_dir); 
+      free(path_copy);
+      return true;
+    }
+   
+  }
+
+  return false;
+}
+
+struct dir* parse_path_parent(char *path, char* filename) {
+  struct dir* actual_dir;
+  struct thread *t = thread_current();
+
+  /* 1. Define o diretório inicial (Root ou CWD) */
+  if (path[0] == '/' || t->working_dir == NULL) {
+    actual_dir = dir_open_root();
+  } else {
+    /* IMPORTANTE: Reopen para não fechar o CWD da thread depois */
+    actual_dir = dir_reopen(t->working_dir);
+  }
+
+  if (actual_dir == NULL) return NULL;
+
+  /* 2. Cópia do path */
+  char *path_copy = malloc(strlen(path) + 1);
+  if (path_copy == NULL) {
+      dir_close(actual_dir);
+      return NULL;
+  }
+  strlcpy(path_copy, path, strlen(path) + 1);
+  
+  char *token, *next_token, *save_ptr;
+  token = strtok_r(path_copy, "/", &save_ptr);
+
+  /* Caso especial: "/" não tem pai nem nome de arquivo */
+  if(token == NULL) {
+    dir_close(actual_dir);
+    free(path_copy);
+    return NULL;
+  }
+
+  while(token != NULL) {
+    /* Espia o próximo token */
+    next_token = strtok_r(NULL, "/", &save_ptr);
+
+    if(next_token != NULL) {
+      /* --- CASO INTERMEDIÁRIO (Ex: "home" em "/home/user") --- */
+      struct inode *inode = NULL;
+      
+      /* Procuramos o diretório intermediário */
+      if(!dir_lookup(actual_dir, token, &inode)){ // Use &inode
+        dir_close(actual_dir);
+        free(path_copy);
+        return NULL; // Caminho inválido (ex: /pasta_inexistente/arquivo)
+      }
+
+      /* Verifica se é diretório */
+      if(!inode_is_dir(inode)) {
+        inode_close(inode);
+        dir_close(actual_dir);
+        free(path_copy);
+        return NULL;
+      }
+
+      /* Avança */
+      dir_close(actual_dir);
+      actual_dir = dir_open(inode);
+      token = next_token;
+    }
+    else {
+      /* --- CASO FINAL (Ex: "user" em "/home/user") --- */
+      /* NÃO fazemos lookup aqui. O "user" será criado depois. */
+      if (strlen(token) > NAME_MAX) {
+        dir_close(actual_dir);
+        free(path_copy);
+        return NULL; // Nome muito longo, rejeita a criação!
+      }
+      
+      strlcpy(filename, token, NAME_MAX + 1); /* Copia para o buffer de saída */
+      free(path_copy);
+      return actual_dir; /* Retorna o diretório PAI aberto */
+    }
+  }
+
+  return NULL;
+}
+
+

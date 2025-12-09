@@ -110,16 +110,24 @@ fsutil_extract (char **argv UNUSED)
           break;
         }
       else if (type == USTAR_DIRECTORY)
-        printf ("ignoring directory %s\n", file_name);
+        {
+          /* MUDANÇA 1: Criar diretórios em vez de ignorar */
+          printf ("Creating directory '%s'...\n", file_name);
+          
+          /* Chama filesys_create com is_dir = true */
+          if (!filesys_create (file_name, 0, true))
+            PANIC ("%s: create failed", file_name);
+        }
       else if (type == USTAR_REGULAR)
         {
           struct file *dst;
 
           printf ("Putting '%s' into the file system...\n", file_name);
 
-          /* Create destination file. */
-          if (!filesys_create (file_name, size))
+          /* MUDANÇA 2: Atualizar assinatura para arquivo regular (is_dir = false) */
+          if (!filesys_create (file_name, size, false))
             PANIC ("%s: create failed", file_name);
+            
           dst = filesys_open (file_name);
           if (dst == NULL)
             PANIC ("%s: open failed", file_name);
@@ -141,20 +149,11 @@ fsutil_extract (char **argv UNUSED)
           file_close (dst);
         }
     }
-
-  /* Erase the ustar header from the start of the block device,
-     so that the extraction operation is idempotent.  We erase
-     two blocks because two blocks of zeros are the ustar
-     end-of-archive marker. */
-  printf ("Erasing ustar archive...\n");
-  memset (header, 0, BLOCK_SECTOR_SIZE);
-  block_write (src, 0, header);
-  block_write (src, 1, header);
-
-  free (data);
-  free (header);
+    
+  /* Libera recursos (opcional, já que o kernel vai desligar ou continuar) */
+  free(header);
+  free(data);
 }
-
 /* Copies file FILE_NAME from the file system to the scratch
    device, in ustar format.
 

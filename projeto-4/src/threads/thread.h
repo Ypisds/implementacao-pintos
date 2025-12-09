@@ -113,11 +113,13 @@ struct thread
     struct semaphore load_sema;
 
     // file
-    struct file* fd_table[128];
+    struct file_desc* fd_table[128];
     int next_fd;
     struct file* executable_file;
     
 #endif
+
+   struct dir* working_dir;
 
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
@@ -130,6 +132,12 @@ struct child_status{
    bool has_loaded;
    struct semaphore wait_sema;
    struct list_elem status_elem;
+};
+
+struct file_desc {
+    struct file *file;   /* Válido se is_dir == false */
+    struct dir *dir;     /* Válido se is_dir == true */
+    bool is_dir;         /* Flag para saber qual usar */
 };
 
 /* If false (default), use round-robin scheduler.

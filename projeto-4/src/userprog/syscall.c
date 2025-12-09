@@ -11,6 +11,8 @@
 #include "pagedir.h"
 #include "userprog/syscall.h"
 #include "filesys/file.h"
+#include "filesys/directory.h"
+#include "filesys/inode.h"
 
 static void syscall_handler (struct intr_frame *);
 
@@ -35,6 +37,11 @@ void sys_filesize(struct intr_frame *f);
 void sys_seek(struct intr_frame *f);
 void sys_tell(struct intr_frame *f);
 void sys_close(struct intr_frame *f);
+bool sys_chdir(struct intr_frame *f);
+bool sys_mkdir(struct intr_frame *f);
+bool sys_readdir(struct intr_frame *f);
+bool sys_isdir(struct intr_frame *f);
+int sys_inumber(struct intr_frame *f);
 struct file *get_file_from_fd(int fd);
 
 bool is_valid_user_ptr(const void *uaddr) {
@@ -103,6 +110,21 @@ syscall_handler (struct intr_frame *f)
       case SYS_CLOSE:
         sys_close(f);
         break;
+      case SYS_CHDIR:
+        f->eax = sys_chdir(f) ? 1 : 0;
+        break;
+      case SYS_MKDIR:
+        f->eax = sys_mkdir(f) ? 1 : 0;
+        break;
+      case SYS_READDIR:
+        f->eax = sys_readdir(f) ? 1 : 0;
+        break;
+      case SYS_ISDIR:
+        f->eax = sys_isdir(f) ? 1 : 0;
+        break;
+      case SYS_INUMBER:
+        f->eax = sys_inumber(f);
+        break;
       
   }
 
@@ -164,7 +186,18 @@ void sys_create(struct intr_frame *f){
   if(!is_valid_user_ptr(file)) sys_exit(-1);
 
   lock_acquire(&filesys_lock);
-  f->eax = filesys_create(file,initial_size);
+
+  if (file[0] != '/') { // Caminho relativo
+      struct dir *cwd = thread_current()->working_dir;
+      /* Se temos um CWD e ele foi removido, não podemos criar nada nele */
+      if (cwd != NULL && inode_is_removed(dir_get_inode(cwd))) {
+          f->eax = 0; // Retorna false
+          lock_release(&filesys_lock);
+          return;
+      }
+  }
+  
+  f->eax = filesys_create(file,initial_size, false);
   lock_release(&filesys_lock);
 }
 void sys_remove(struct intr_frame *f){
@@ -173,8 +206,9 @@ void sys_remove(struct intr_frame *f){
   const char *file = (const char*)*((int*)f->esp+1);
 
   lock_acquire(&filesys_lock);
-  filesys_remove(file);
+  bool status = filesys_remove(file);
   lock_release(&filesys_lock);
+  f -> eax = status ? 1 : 0;
 }
 void sys_write(struct intr_frame *f){
   if(!is_valid_user_ptr((int*)f->esp+1) || !is_valid_user_ptr((int*)f->esp+2) || !is_valid_user_ptr((int*)f->esp+3)){
@@ -241,48 +275,112 @@ void sys_read(struct intr_frame *f){
     }
   }
 }
-void sys_open(struct intr_frame *f) {
-  if(!is_valid_user_ptr((int*)f->esp+1))
+void
+sys_open (struct intr_frame *f)
+{
+  if(!is_valid_user_ptr((int*)f->esp+1)){
     sys_exit(-1);
-  const char *filename = (char *)*((int*)f->esp+1);
+  }
+  /* 1. Recupera argumentos da pilha */
+  char * file_name = *((int*)f->esp+1);
 
-  if(!is_valid_user_ptr(filename)) sys_exit(-1);
+  if(!is_valid_user_ptr(file_name)) sys_exit(-1);
 
-  if (!is_user_vaddr(filename) || filename == NULL) {
-    f->eax = -1;
-    return;
-
+  /* Validação de ponteiro (obrigatório para testes sc-*) */
+  if (file_name == NULL || !is_user_vaddr(file_name)) {
+      sys_exit(-1);
   }
 
-  lock_acquire(&filesys_lock);
-  struct file *file = filesys_open(filename);
-  lock_release(&filesys_lock);
-
-  if(file == NULL) {
+  if(strlen(file_name) == 0) {
     f->eax = -1;
     return;
   }
 
-  int fd;
-  struct thread *cur = thread_current();
-  for (fd = 2; fd < 128; fd++) {
-    if (cur->fd_table[fd] == NULL)
-        break;
+  if (file_name[0] != '/') {
+      struct dir *cwd = thread_current()->working_dir;
+      if (cwd != NULL && inode_is_removed(dir_get_inode(cwd))) {
+          f->eax = -1;
+          return;
+      }
   }
-  if(fd == 128) {
-    file_close(file);
-    f->eax = -1;
-  }
-  else {
-    thread_current()->fd_table[fd] = file;
-    f->eax = fd;
+
+  struct thread *cur = thread_current ();
+  
+  /* 2. Encontra um slot livre na fd_table (FD 0 e 1 são reservados) */
+  int fd = -1;
+  for (int i = 2; i < 128; i++) {
+      if (cur->fd_table[i] == NULL) {
+          fd = i;
+          break;
+      }
   }
   
+  /* Se tabela cheia, retorna erro */
+  if (fd == -1) {
+    f-> eax = -1;
+    return;
+  } 
+
+  /* 3. Resolve o caminho para encontrar o INODE */
+  struct inode *inode = NULL;
+  
+  /* Usa sua função de parsing. Ela já retorna o inode aberto (open_cnt++) */
+  if (!dir_path_handler(file_name, &inode)) {
+      f->eax = -1; // Arquivo ou diretório não existe
+      return;
+  }
+
+  if (inode_is_removed(inode)) {
+      inode_close(inode); /* Importante: devolve a referência pega pelo handler */
+      f->eax = -1;
+      return;
+  }
+
+  /* 4. Aloca o envelope (Wrapper) */
+  struct file_desc *fdesc = malloc(sizeof(struct file_desc));
+  if (fdesc == NULL) {
+      inode_close(inode); // Falta de memória, devolve o inode
+      f->eax = -1;
+      return;
+  }
+
+  /* 5. A GRANDE MUDANÇA: Decide se abre como DIR ou FILE */
+  if (inode_is_dir(inode)) {
+      /* É um diretório: usa dir_open */
+      fdesc->dir = dir_open(inode);
+      fdesc->file = NULL;
+      fdesc->is_dir = true;
+      
+      /* Verificação de falha */
+      if (fdesc->dir == NULL) {
+          free(fdesc);
+          f->eax = -1;
+          return;
+      }
+  } else {
+      /* É um arquivo: usa file_open */
+      fdesc->file = file_open(inode);
+      fdesc->dir = NULL;
+      fdesc->is_dir = false;
+
+      /* Verificação de falha */
+      if (fdesc->file == NULL) {
+          free(fdesc);
+          f->eax = -1;
+          return;
+      }
+  }
+
+  /* 6. Salva na tabela e retorna o índice */
+  cur->fd_table[fd] = fdesc;
+  f->eax = fd;
 }
 
 struct file *get_file_from_fd(int fd) {
   if(fd >=2 && fd < 128) {
-    struct file* file = thread_current()->fd_table[fd];
+    struct file_desc* file_desc = thread_current()->fd_table[fd];
+    if(file_desc == NULL || file_desc->is_dir) return NULL;
+    struct file* file = file_desc->file;
     return file;
   }
   else {
@@ -346,15 +444,141 @@ void sys_close(struct intr_frame *f){
     sys_exit(-1);
   int fd = *((int*)f->esp+1);
 
-  struct file *file = get_file_from_fd(fd);
+  struct thread* cur = thread_current();
 
-  if(file != NULL ){
-    thread_current()->fd_table[fd] = NULL;
+  /* Validação básica de range */
+  if (fd < 2 || fd >= 128) return;
+
+  /* Acessa o envelope diretamente */
+  struct file_desc *fdesc = cur->fd_table[fd];
+
+  if (fdesc != NULL) {
     lock_acquire(&filesys_lock);
-    file_close(file);
+    
+    /* Decide o que fechar baseado na flag */
+    if (fdesc->is_dir) {
+        dir_close(fdesc->dir);
+    } else {
+        file_close(fdesc->file);
+    }
+    
     lock_release(&filesys_lock);
 
+    /* LIMPEZA DE MEMÓRIA CRÍTICA */
+    free(fdesc);             // Libera o malloc feito no sys_open
+    cur->fd_table[fd] = NULL; // Marca o slot como livre
   }
+}
+
+bool sys_chdir(struct intr_frame *f){
+  const char *dir_name = *((int*)f->esp+1);
+  struct inode *dir_inode = NULL;
+  
+  if(dir_path_handler(dir_name, &dir_inode)) {
+    if(!inode_is_dir(dir_inode)){
+      inode_close(dir_inode);
+      return false;
+    }
+    
+    struct dir *old_dir = thread_current()->working_dir;
+    thread_current()->working_dir = dir_open(dir_inode);
+
+    if (old_dir != NULL) 
+    {
+       dir_close(old_dir);
+    }
+
+    return true;
+  }
+
+  return false;
+}
+
+bool sys_mkdir(struct intr_frame *f){
+  const char *path = *((int*)f->esp+1);
+
+  return filesys_create(path, 0, true);
+}
+
+bool sys_readdir(struct intr_frame *f){
+  int fd = *((int*)f->esp+1);
+  char *name = *((int*)f->esp+2);
+
+  if(fd < 2 || fd >= 128) return false;
+
+  struct file_desc* file_desc = thread_current()->fd_table[fd];
+
+  if(file_desc == NULL || !file_desc->is_dir) return false;
+
+  lock_acquire(&filesys_lock);
+  
+  bool success;
+  
+  /* --- MUDANÇA AQUI --- */
+  /* Loop: Continue lendo enquanto for ponto ou ponto-ponto */
+  while (true) 
+  {
+      /* Chama a função original */
+      success = dir_readdir(file_desc->dir, name);
+      
+      /* Se acabou o diretório, pare e retorne false */
+      if (!success) {
+          break; 
+      }
+
+      /* Se o nome lido NÃO for "." E NÃO for "..", achamos um arquivo real! */
+      /* Pare o loop e retorne true */
+      if (strcmp(name, ".") != 0 && strcmp(name, "..") != 0) {
+          break;
+      }
+      
+      /* Se chegou aqui, é "." ou "..". O loop roda de novo automaticamente 
+         e lê a próxima entrada do disco, "pulando" a atual. */
+  }
+  /* ------------------- */
+
+  lock_release(&filesys_lock);
+
+  return success;
+  
+}
+
+bool sys_isdir(struct intr_frame *f) {
+
+  int fd = *((int*)f->esp+1);
+
+  if(fd < 2 || fd >= 128) return false;
+
+  struct file_desc* file_desc = thread_current()->fd_table[fd];
+
+  if(file_desc == NULL) return false;
+
+  return file_desc -> is_dir;
+
+}
+
+int sys_inumber(struct intr_frame *f) {
+  int fd = *((int*)f->esp+1);
+
+  if(fd < 2 || fd >= 128) return -1;
+
+  struct file_desc* file_desc = thread_current()->fd_table[fd];
+
+  if(file_desc == NULL) return -1;
+
+  struct inode *inode = NULL;
+
+  /* 3. Extrai o Inode baseando-se no tipo */
+  if (file_desc->is_dir) {
+      /* Você precisa garantir que dir_get_inode esteja visível em directory.h */
+      inode = dir_get_inode(file_desc->dir);
+  } else {
+      /* Você precisa garantir que file_get_inode esteja visível em file.h */
+      inode = file_get_inode(file_desc->file);
+  }
+
+  /* 4. Retorna o número do setor do inode */
+  return (int) inode_get_inumber(inode);
 }
 
 

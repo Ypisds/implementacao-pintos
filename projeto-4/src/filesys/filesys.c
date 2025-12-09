@@ -47,19 +47,48 @@ filesys_done (void)
    Returns true if successful, false otherwise.
    Fails if a file named NAME already exists,
    or if internal memory allocation fails. */
+/* Em filesys/filesys.c */
 bool
-filesys_create (const char *name, off_t initial_size) 
+filesys_create (const char *name, off_t initial_size, bool is_dir) 
 {
   block_sector_t inode_sector = 0;
-  struct dir *dir = dir_open_root ();
-  bool success = (dir != NULL
-                  && free_map_allocate (1, &inode_sector)
-                  && inode_create (inode_sector, initial_size)
-                  && dir_add (dir, name, inode_sector));
-  if (!success && inode_sector != 0) 
-    free_map_release (inode_sector, 1);
-  dir_close (dir);
+  char filename[NAME_MAX + 1];
+  
+  /* 1. Usa sua função nova para pegar o PAI */
+  struct dir *parent_dir = parse_path_parent (name, filename);
+  
+  if (parent_dir == NULL) return false;
 
+  /* 2. Extrai o setor do pai para passar para o filho */
+  struct inode *parent_inode = dir_get_inode(parent_dir);
+  block_sector_t parent_sector = inode_get_inumber(parent_inode);
+
+  bool success = false;
+  
+  /* 3. Aloca o novo setor */
+  if (free_map_allocate (1, &inode_sector)) 
+    {
+      if (is_dir) 
+        {
+           /* MÁGICA: Passa o parent_sector que descobrimos acima */
+           success = dir_create (inode_sector, 0, parent_sector);
+        }
+      else 
+        {
+           success = inode_create (inode_sector, initial_size);
+        }
+
+      /* 4. Adiciona o nome no diretório pai */
+      if (success)
+        {
+          success = dir_add (parent_dir, filename, inode_sector);
+        }
+      
+      if (!success) 
+         free_map_release (inode_sector, 1);
+    }
+    
+  dir_close (parent_dir);
   return success;
 }
 
@@ -71,14 +100,18 @@ filesys_create (const char *name, off_t initial_size)
 struct file *
 filesys_open (const char *name)
 {
-  struct dir *dir = dir_open_root ();
   struct inode *inode = NULL;
 
-  if (dir != NULL)
-    dir_lookup (dir, name, &inode);
-  dir_close (dir);
+  /* 1. Navega pelo caminho (Absoluto ou Relativo) */
+  /* dir_path_handler retorna true se achou, e preenche 'inode' */
+  if (!dir_path_handler (name, &inode))
+    {
+      /* Caminho inválido ou arquivo não existe */
+      return NULL;
+    }
 
-
+  /* 2. Cria a estrutura de arquivo associada ao inode */
+  /* file_open retorna NULL se o inode for NULL, mas já checamos isso antes */
   return file_open (inode);
 }
 
@@ -89,9 +122,21 @@ filesys_open (const char *name)
 bool
 filesys_remove (const char *name) 
 {
-  struct dir *dir = dir_open_root ();
-  bool success = dir != NULL && dir_remove (dir, name);
-  dir_close (dir); 
+  char filename[NAME_MAX + 1];
+  
+  /* 1. Navega até o diretório pai e extrai o nome do arquivo final */
+  struct dir *dir = parse_path_parent (name, filename);
+  
+  bool success = false;
+  
+  if (dir != NULL)
+    {
+      /* 2. Chama dir_remove no diretório correto */
+      success = dir_remove (dir, filename);
+      
+      /* 3. Fecha o diretório pai */
+      dir_close (dir); 
+    }
 
   return success;
 }
@@ -102,7 +147,7 @@ do_format (void)
 {
   printf ("Formatting file system...");
   free_map_create ();
-  if (!dir_create (ROOT_DIR_SECTOR, 16))
+  if (!dir_create (ROOT_DIR_SECTOR, 16, ROOT_DIR_SECTOR))
     PANIC ("root directory creation failed");
   free_map_close ();
   printf ("done.\n");

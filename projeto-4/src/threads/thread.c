@@ -190,6 +190,14 @@ thread_create (const char *name, int priority,
 
   #endif
 
+  #ifdef FILESYS
+    struct thread* parent = thread_current();
+    if (parent->working_dir != NULL)
+  {
+    t->working_dir = dir_reopen (parent->working_dir);
+  }
+  #endif
+
   /* Stack frame for kernel_thread(). */
   kf = alloc_frame (t, sizeof *kf);
   kf->eip = NULL;
@@ -291,6 +299,13 @@ thread_exit (void)
 
 #ifdef USERPROG
   process_exit ();
+#endif
+
+#ifdef FILESYS
+  if (thread_current()->working_dir != NULL)
+  {
+    dir_close (thread_current()->working_dir);
+  }
 #endif
 
   /* Remove thread from all threads list, set our status to dying,
