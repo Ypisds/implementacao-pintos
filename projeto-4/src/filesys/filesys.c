@@ -49,30 +49,29 @@ filesys_done (void)
    Returns true if successful, false otherwise.
    Fails if a file named NAME already exists,
    or if internal memory allocation fails. */
-/* Em filesys/filesys.c */
+
 bool
 filesys_create (const char *name, off_t initial_size, bool is_dir) 
 {
   block_sector_t inode_sector = 0;
   char filename[NAME_MAX + 1];
   
-  /* 1. Usa sua função nova para pegar o PAI */
+  
   struct dir *parent_dir = parse_path_parent (name, filename);
   
   if (parent_dir == NULL) return false;
 
-  /* 2. Extrai o setor do pai para passar para o filho */
+  
   struct inode *parent_inode = dir_get_inode(parent_dir);
   block_sector_t parent_sector = inode_get_inumber(parent_inode);
 
   bool success = false;
   
-  /* 3. Aloca o novo setor */
+  
   if (free_map_allocate (1, &inode_sector)) 
     {
       if (is_dir) 
         {
-           /* MÁGICA: Passa o parent_sector que descobrimos acima */
            success = dir_create (inode_sector, 0, parent_sector);
         }
       else 
@@ -80,7 +79,6 @@ filesys_create (const char *name, off_t initial_size, bool is_dir)
            success = inode_create (inode_sector, initial_size);
         }
 
-      /* 4. Adiciona o nome no diretório pai */
       if (success)
         {
           success = dir_add (parent_dir, filename, inode_sector);
@@ -104,16 +102,11 @@ filesys_open (const char *name)
 {
   struct inode *inode = NULL;
 
-  /* 1. Navega pelo caminho (Absoluto ou Relativo) */
-  /* dir_path_handler retorna true se achou, e preenche 'inode' */
   if (!dir_path_handler (name, &inode))
     {
-      /* Caminho inválido ou arquivo não existe */
       return NULL;
     }
-
-  /* 2. Cria a estrutura de arquivo associada ao inode */
-  /* file_open retorna NULL se o inode for NULL, mas já checamos isso antes */
+  
   return file_open (inode);
 }
 
@@ -125,24 +118,21 @@ bool
 filesys_remove (const char *name) 
 {
   char filename[NAME_MAX + 1];
-  
-  /* 1. Navega até o diretório pai e extrai o nome do arquivo final */
+
   struct dir *dir = parse_path_parent (name, filename);
   
   bool success = false;
   
   if (dir != NULL)
     {
-      /* 2. Chama dir_remove no diretório correto */
       success = dir_remove (dir, filename);
-      
-      /* 3. Fecha o diretório pai */
+
       dir_close (dir); 
     }
 
   return success;
 }
-
+
 /* Formats the file system. */
 static void
 do_format (void)

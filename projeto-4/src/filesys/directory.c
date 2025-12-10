@@ -33,29 +33,25 @@ struct dir_entry
 /* Creates a directory in the given SECTOR. 
    Returns true if successful, false on failure. */
 bool
-dir_create (block_sector_t sector, size_t entry_cnt, block_sector_t parent) // <--- Recebe o PAI aqui
+dir_create (block_sector_t sector, size_t entry_cnt, block_sector_t parent)
 {
-  /* 1. Cria como se fosse um arquivo normal (is_dir = 0) */
+  
   if (!inode_create (sector, 0)) 
     return false;
 
-  /* 2. Marca a flag de diretório */
   if (!inode_mark_as_dir (sector)) 
     return false;
 
-  /* 3. Abre o diretório recém-criado */
+  
   struct dir *dir = dir_open (inode_open (sector));
   if (dir == NULL) 
     return false;
 
-  /* 4. Adiciona as entradas mágicas */
   bool success = true;
   
-  /* "." -> Aponta para SI MESMO */
   if (!dir_add (dir, ".", sector)) 
     success = false;
 
-  /* ".." -> Aponta para o PAI recebido por parâmetro */
   if (!dir_add (dir, "..", parent)) 
     success = false; 
 
@@ -128,7 +124,6 @@ is_dir_empty (struct dir *dir)
     {
       if (e.in_use)
         {
-          /* Se encontrar qualquer coisa que não seja "." ou "..", não está vazio */
           if (strcmp (e.name, ".") != 0 && strcmp (e.name, "..") != 0)
             return false;
         }
@@ -248,7 +243,6 @@ dir_remove (struct dir *dir, const char *name)
   if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0)
     return false;
 
-  /* 1. Find directory entry. */
   if (!lookup (dir, name, &e, &ofs))
     goto done;
 
@@ -257,35 +251,29 @@ dir_remove (struct dir *dir, const char *name)
   if (inode == NULL)
     goto done;
 
-  /* 3. SEGURANÇA: Verificar se é um diretório */
   if (inode_is_dir (inode)) 
     {
-      /* 3.1 Se for diretório, verificar se é o diretório raiz (não pode deletar root) */
       if (inode_get_inumber(inode) == ROOT_DIR_SECTOR) goto done; 
 
 
-      /* 3.3 Verificar se o diretório está vazio */
       struct dir *target_dir = dir_open (inode_reopen (inode));
       if (target_dir == NULL) goto done;
 
       bool is_empty = is_dir_empty (target_dir);
       
-      /* Precisamos fechar o target_dir aqui, mas SEM fechar o inode original
-         pois dir_open dá um inode_reopen. Vamos usar dir_close mas cuidado
-         para não fechar o inode que abrimos na linha "inode = ...".
-         Melhor: dir_open incrementa open_cnt, dir_close decrementa. Seguro. */
+
       dir_close (target_dir);
 
       if (!is_empty)
-        goto done; /* Falha: diretório não está vazio */
+        goto done; 
     }
 
-  /* 4. Erase directory entry. */
+  
   e.in_use = false;
   if (inode_write_at (dir->inode, &e, sizeof e, ofs) != sizeof e) 
     goto done;
 
-  /* 5. Remove inode. */
+  
   inode_remove (inode);
   success = true;
 
@@ -325,7 +313,6 @@ dir_path_handler(const char *name, struct inode **inode){ // passa um path e esc
 bool
 handle_absolute_path(const char *name, struct inode **inode) {
   struct dir *actual_dir = dir_open_root();
-
 
   char *path_copy = malloc(strlen(name) + 1);
   if (path_copy == NULL) {
@@ -372,9 +359,9 @@ processing_path(char * path_copy, struct inode** inode, struct dir* actual_dir){
   if(token == NULL) {
     *inode = dir_get_inode(actual_dir);
     inode_reopen(*inode); /* Incrementa ref count pois vamos fechar curr_dir */
-    dir_close(actual_dir);
+    dir_close(actual_dir); 
     free(path_copy);
-    return true;
+    return true; 
   }
 
   while(token != NULL) {
@@ -397,7 +384,7 @@ processing_path(char * path_copy, struct inode** inode, struct dir* actual_dir){
       }
 
       dir_close(actual_dir);
-      actual_dir = dir_open(*inode);
+      actual_dir = dir_open(*inode); 
       token = next_token;
     }
     else {
@@ -415,17 +402,17 @@ struct dir* parse_path_parent(char *path, char* filename) {
   struct dir* actual_dir;
   struct thread *t = thread_current();
 
-  /* 1. Define o diretório inicial (Root ou CWD) */
+  
   if (path[0] == '/' || t->working_dir == NULL) {
     actual_dir = dir_open_root();
   } else {
-    /* IMPORTANTE: Reopen para não fechar o CWD da thread depois */
+    
     actual_dir = dir_reopen(t->working_dir);
   }
 
   if (actual_dir == NULL) return NULL;
 
-  /* 2. Cópia do path */
+  
   char *path_copy = malloc(strlen(path) + 1);
   if (path_copy == NULL) {
       dir_close(actual_dir);
@@ -436,7 +423,7 @@ struct dir* parse_path_parent(char *path, char* filename) {
   char *token, *next_token, *save_ptr;
   token = strtok_r(path_copy, "/", &save_ptr);
 
-  /* Caso especial: "/" não tem pai nem nome de arquivo */
+  
   if(token == NULL) {
     dir_close(actual_dir);
     free(path_copy);
@@ -444,21 +431,21 @@ struct dir* parse_path_parent(char *path, char* filename) {
   }
 
   while(token != NULL) {
-    /* Espia o próximo token */
+    
     next_token = strtok_r(NULL, "/", &save_ptr);
 
     if(next_token != NULL) {
-      /* --- CASO INTERMEDIÁRIO (Ex: "home" em "/home/user") --- */
+      
       struct inode *inode = NULL;
       
-      /* Procuramos o diretório intermediário */
-      if(!dir_lookup(actual_dir, token, &inode)){ // Use &inode
+      
+      if(!dir_lookup(actual_dir, token, &inode)){ 
         dir_close(actual_dir);
         free(path_copy);
-        return NULL; // Caminho inválido (ex: /pasta_inexistente/arquivo)
+        return NULL; 
       }
 
-      /* Verifica se é diretório */
+      
       if(!inode_is_dir(inode)) {
         inode_close(inode);
         dir_close(actual_dir);
@@ -466,23 +453,22 @@ struct dir* parse_path_parent(char *path, char* filename) {
         return NULL;
       }
 
-      /* Avança */
+      
       dir_close(actual_dir);
       actual_dir = dir_open(inode);
       token = next_token;
     }
     else {
-      /* --- CASO FINAL (Ex: "user" em "/home/user") --- */
-      /* NÃO fazemos lookup aqui. O "user" será criado depois. */
+      
       if (strlen(token) > NAME_MAX) {
         dir_close(actual_dir);
         free(path_copy);
-        return NULL; // Nome muito longo, rejeita a criação!
+        return NULL; 
       }
       
-      strlcpy(filename, token, NAME_MAX + 1); /* Copia para o buffer de saída */
+      strlcpy(filename, token, NAME_MAX + 1); 
       free(path_copy);
-      return actual_dir; /* Retorna o diretório PAI aberto */
+      return actual_dir; 
     }
   }
 

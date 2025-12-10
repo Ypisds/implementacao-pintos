@@ -187,11 +187,11 @@ void sys_create(struct intr_frame *f){
 
   lock_acquire(&filesys_lock);
 
-  if (file[0] != '/') { // Caminho relativo
+  if (file[0] != '/') { 
       struct dir *cwd = thread_current()->working_dir;
-      /* Se temos um CWD e ele foi removido, não podemos criar nada nele */
+      
       if (cwd != NULL && inode_is_removed(dir_get_inode(cwd))) {
-          f->eax = 0; // Retorna false
+          f->eax = 0; 
           lock_release(&filesys_lock);
           return;
       }
@@ -281,12 +281,12 @@ sys_open (struct intr_frame *f)
   if(!is_valid_user_ptr((int*)f->esp+1)){
     sys_exit(-1);
   }
-  /* 1. Recupera argumentos da pilha */
+  
   char * file_name = *((int*)f->esp+1);
 
   if(!is_valid_user_ptr(file_name)) sys_exit(-1);
 
-  /* Validação de ponteiro (obrigatório para testes sc-*) */
+  
   if (file_name == NULL || !is_user_vaddr(file_name)) {
       sys_exit(-1);
   }
@@ -306,7 +306,7 @@ sys_open (struct intr_frame *f)
 
   struct thread *cur = thread_current ();
   
-  /* 2. Encontra um slot livre na fd_table (FD 0 e 1 são reservados) */
+  
   int fd = -1;
   for (int i = 2; i < 128; i++) {
       if (cur->fd_table[i] == NULL) {
@@ -315,55 +315,54 @@ sys_open (struct intr_frame *f)
       }
   }
   
-  /* Se tabela cheia, retorna erro */
+  
   if (fd == -1) {
     f-> eax = -1;
     return;
   } 
 
-  /* 3. Resolve o caminho para encontrar o INODE */
+  
   struct inode *inode = NULL;
   
-  /* Usa sua função de parsing. Ela já retorna o inode aberto (open_cnt++) */
+  
   if (!dir_path_handler(file_name, &inode)) {
-      f->eax = -1; // Arquivo ou diretório não existe
+      f->eax = -1; 
       return;
   }
 
   if (inode_is_removed(inode)) {
-      inode_close(inode); /* Importante: devolve a referência pega pelo handler */
-      f->eax = -1;
+      inode_close(inode); 
       return;
   }
 
-  /* 4. Aloca o envelope (Wrapper) */
+  
   struct file_desc *fdesc = malloc(sizeof(struct file_desc));
   if (fdesc == NULL) {
-      inode_close(inode); // Falta de memória, devolve o inode
+      inode_close(inode); 
       f->eax = -1;
       return;
   }
 
-  /* 5. A GRANDE MUDANÇA: Decide se abre como DIR ou FILE */
+  
   if (inode_is_dir(inode)) {
-      /* É um diretório: usa dir_open */
+      
       fdesc->dir = dir_open(inode);
       fdesc->file = NULL;
       fdesc->is_dir = true;
       
-      /* Verificação de falha */
+      
       if (fdesc->dir == NULL) {
           free(fdesc);
           f->eax = -1;
           return;
       }
   } else {
-      /* É um arquivo: usa file_open */
+      
       fdesc->file = file_open(inode);
       fdesc->dir = NULL;
       fdesc->is_dir = false;
 
-      /* Verificação de falha */
+      
       if (fdesc->file == NULL) {
           free(fdesc);
           f->eax = -1;
@@ -371,7 +370,7 @@ sys_open (struct intr_frame *f)
       }
   }
 
-  /* 6. Salva na tabela e retorna o índice */
+  
   cur->fd_table[fd] = fdesc;
   f->eax = fd;
 }
@@ -446,16 +445,16 @@ void sys_close(struct intr_frame *f){
 
   struct thread* cur = thread_current();
 
-  /* Validação básica de range */
+  
   if (fd < 2 || fd >= 128) return;
 
-  /* Acessa o envelope diretamente */
+  
   struct file_desc *fdesc = cur->fd_table[fd];
 
   if (fdesc != NULL) {
     lock_acquire(&filesys_lock);
     
-    /* Decide o que fechar baseado na flag */
+    
     if (fdesc->is_dir) {
         dir_close(fdesc->dir);
     } else {
@@ -464,9 +463,9 @@ void sys_close(struct intr_frame *f){
     
     lock_release(&filesys_lock);
 
-    /* LIMPEZA DE MEMÓRIA CRÍTICA */
-    free(fdesc);             // Libera o malloc feito no sys_open
-    cur->fd_table[fd] = NULL; // Marca o slot como livre
+    
+    free(fdesc);             
+    cur->fd_table[fd] = NULL; 
   }
 }
 
@@ -514,28 +513,17 @@ bool sys_readdir(struct intr_frame *f){
   
   bool success;
   
-  /* --- MUDANÇA AQUI --- */
-  /* Loop: Continue lendo enquanto for ponto ou ponto-ponto */
   while (true) 
   {
-      /* Chama a função original */
       success = dir_readdir(file_desc->dir, name);
       
-      /* Se acabou o diretório, pare e retorne false */
       if (!success) {
           break; 
       }
-
-      /* Se o nome lido NÃO for "." E NÃO for "..", achamos um arquivo real! */
-      /* Pare o loop e retorne true */
       if (strcmp(name, ".") != 0 && strcmp(name, "..") != 0) {
           break;
       }
-      
-      /* Se chegou aqui, é "." ou "..". O loop roda de novo automaticamente 
-         e lê a próxima entrada do disco, "pulando" a atual. */
   }
-  /* ------------------- */
 
   lock_release(&filesys_lock);
 
@@ -568,16 +556,12 @@ int sys_inumber(struct intr_frame *f) {
 
   struct inode *inode = NULL;
 
-  /* 3. Extrai o Inode baseando-se no tipo */
   if (file_desc->is_dir) {
-      /* Você precisa garantir que dir_get_inode esteja visível em directory.h */
       inode = dir_get_inode(file_desc->dir);
   } else {
-      /* Você precisa garantir que file_get_inode esteja visível em file.h */
       inode = file_get_inode(file_desc->file);
   }
 
-  /* 4. Retorna o número do setor do inode */
   return (int) inode_get_inumber(inode);
 }
 

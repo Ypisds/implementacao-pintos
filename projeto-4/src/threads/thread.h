@@ -135,9 +135,9 @@ struct child_status{
 };
 
 struct file_desc {
-    struct file *file;   /* Válido se is_dir == false */
-    struct dir *dir;     /* Válido se is_dir == true */
-    bool is_dir;         /* Flag para saber qual usar */
+    struct file *file;   
+    struct dir *dir;     
+    bool is_dir;         
 };
 
 /* If false (default), use round-robin scheduler.

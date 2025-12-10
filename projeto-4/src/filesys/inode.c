@@ -17,19 +17,21 @@ struct inode_disk
   {
     off_t length;                       
     unsigned magic;                     
-    uint32_t is_dir; /* <--- NOVA FLAG: 1 se for diretório, 0 se arquivo */
+    uint32_t is_dir;
     
-    block_sector_t direct[10];
-    block_sector_t indirect;              
-    block_sector_t double_indirect;       
+    block_sector_t direct[10]; 
+    block_sector_t indirect;   
+    block_sector_t double_indirect;   
 
-    uint32_t unused[113]; /* Reduzi 1 aqui para caber o is_dir */              
+    uint32_t unused[113];           
   };
+
+
 
 
 #define PTRS_PER_SECTOR 128
 
-/* Função auxiliar para alocar um setor com zeros. */
+
 static bool
 allocate_sector (block_sector_t *sector_idx)
 {
@@ -40,13 +42,9 @@ allocate_sector (block_sector_t *sector_idx)
   return true;
 }
 
-/* O CORAÇÃO DA EXTENSIBILIDADE.
-   Retorna o setor onde está o dado correspondente ao 'sector_index' do arquivo.
-   Se 'create' for true, cria os setores (índices e dados) se não existirem. */
 static block_sector_t
 inode_get_block (struct inode_disk *disk_inode, block_sector_t sector_index, bool create)
 {
-  /* 1. Blocos Diretos (0 a 9) */
   if (sector_index < 10)
     {
       if (disk_inode->direct[sector_index] == 0)
@@ -59,8 +57,7 @@ inode_get_block (struct inode_disk *disk_inode, block_sector_t sector_index, boo
   
   sector_index -= 10;
 
-  /* 2. Bloco Indireto (10 a 137) */
-  if (sector_index < PTRS_PER_SECTOR)
+  if (sector_index < PTRS_PER_SECTOR) 
     {
       if (disk_inode->indirect == 0)
         {
@@ -68,7 +65,7 @@ inode_get_block (struct inode_disk *disk_inode, block_sector_t sector_index, boo
             return 0;
         }
 
-      block_sector_t *indirect_block = malloc (BLOCK_SECTOR_SIZE);
+      block_sector_t *indirect_block = malloc (BLOCK_SECTOR_SIZE); 
       if (!indirect_block) return 0;
 
       cache_read (disk_inode->indirect, indirect_block);
@@ -76,7 +73,7 @@ inode_get_block (struct inode_disk *disk_inode, block_sector_t sector_index, boo
       block_sector_t ret = indirect_block[sector_index];
       if (ret == 0 && create)
         {
-          if (allocate_sector (&indirect_block[sector_index]))
+          if (allocate_sector (&indirect_block[sector_index])) 
             {
               cache_write (disk_inode->indirect, indirect_block);
               ret = indirect_block[sector_index];
@@ -86,9 +83,8 @@ inode_get_block (struct inode_disk *disk_inode, block_sector_t sector_index, boo
       return ret;
     }
 
-  sector_index -= PTRS_PER_SECTOR;
+  sector_index -= PTRS_PER_SECTOR; 
 
-  /* 3. Bloco Duplamente Indireto (138 em diante) */
   if (sector_index < PTRS_PER_SECTOR * PTRS_PER_SECTOR)
     {
       if (disk_inode->double_indirect == 0)
@@ -97,13 +93,12 @@ inode_get_block (struct inode_disk *disk_inode, block_sector_t sector_index, boo
             return 0;
         }
 
-      /* Nível 1: Ler o índice do índice */
       block_sector_t *l1_block = malloc (BLOCK_SECTOR_SIZE);
       if (!l1_block) return 0;
       cache_read (disk_inode->double_indirect, l1_block);
 
-      off_t l1_idx = sector_index / PTRS_PER_SECTOR;
-      off_t l2_idx = sector_index % PTRS_PER_SECTOR;
+      off_t l1_idx = sector_index / PTRS_PER_SECTOR; // indice do primeiro bloco indireto
+      off_t l2_idx = sector_index % PTRS_PER_SECTOR; // indice do segundo bloco indireto
 
       if (l1_block[l1_idx] == 0)
         {
@@ -118,7 +113,6 @@ inode_get_block (struct inode_disk *disk_inode, block_sector_t sector_index, boo
       block_sector_t next_sector = l1_block[l1_idx];
       free (l1_block);
 
-      /* Nível 2: Ler o índice final */
       block_sector_t *l2_block = malloc (BLOCK_SECTOR_SIZE);
       if (!l2_block) return 0;
       cache_read (next_sector, l2_block);
@@ -205,7 +199,7 @@ inode_create (block_sector_t sector, off_t length)
       disk_inode->magic = INODE_MAGIC;
       disk_inode->is_dir = 0;
       
-      /* Aloca os blocos necessários se length > 0 */
+      
       if (length > 0)
         {
           size_t sectors = bytes_to_sectors (length);
@@ -214,7 +208,7 @@ inode_create (block_sector_t sector, off_t length)
             {
               if (inode_get_block (disk_inode, i, true) == 0)
                 {
-                  /* Se falhar alocação, deveria limpar, mas para simplificar retornamos false */
+                  
                   free (disk_inode);
                   return false;
                 }
@@ -304,29 +298,24 @@ inode_close (struct inode *inode)
         {
           free_map_release (inode->sector, 1);
           
-          /* Lógica simplificada de desalocação: Varre todos os blocos possíveis do arquivo */
-          /* Nota: Uma implementação ideal navega na árvore de ponteiros para ser mais rápida.
-             Mas iterar pelos blocos lógicos funciona se inode_get_block retornar 0 para não alocados. */
           
           size_t sectors = bytes_to_sectors (inode->data.length);
           size_t i;
           
-          /* Libera os dados */
+          
           for (i = 0; i < sectors; i++)
             {
                block_sector_t s = inode_get_block (&inode->data, i, false);
                if (s != 0) free_map_release (s, 1);
             }
           
-          /* Libera os índices (indireto e duplo) */
+          
           if (inode->data.indirect != 0) 
              free_map_release (inode->data.indirect, 1);
              
           if (inode->data.double_indirect != 0) 
             {
-               /* Precisaria liberar o índice nível 2 também aqui, mas para começar, libere o nível 1 */
-               /* Implementação completa de desalocação recursiva recomendada para nota máxima */
-               /* Esta parte é a mais complexa de fazer "rápido". Se quiser a recursiva completa me avise. */
+               
                free_map_release (inode->data.double_indirect, 1); 
             }
         }
@@ -335,8 +324,7 @@ inode_close (struct inode *inode)
     }
 }
 
-/* Marks INODE to be deleted when it is closed by the last caller who
-   has it open. */
+
 void
 inode_remove (struct inode *inode) 
 {
@@ -415,12 +403,12 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
   if (inode->deny_write_cnt)
     return 0;
 
-  /* PARTE NOVA: Extensão automática do arquivo */
+  
   if (offset + size > inode_length (inode))
     {
       if (!inode->deny_write_cnt) 
         {
-          /* Estende o arquivo alocando os blocos necessários */
+          
           struct inode_disk *disk_inode = &inode->data;
           size_t sectors_needed = bytes_to_sectors (offset + size);
           size_t current_sectors = bytes_to_sectors (inode_length (inode));
@@ -429,7 +417,7 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
           for (i = current_sectors; i < sectors_needed; i++)
             {
               if (inode_get_block (disk_inode, i, true) == 0)
-                 return 0; /* Falha na extensão (disco cheio) */
+                 return 0; 
             }
           
           disk_inode->length = offset + size;
